@@ -76,6 +76,8 @@ const ADMIN_INITIAL_DATA = {
   planejamentoExtra: []
 };
 
+const VINI_INITIAL_DATA = ADMIN_INITIAL_DATA;
+
 // Executa SQL diretamente no Oracle Autonomous Database (ATP Exadata)
 function executeSql(sql) {
   return new Promise((resolve, reject) => {

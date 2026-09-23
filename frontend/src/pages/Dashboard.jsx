@@ -49,10 +49,15 @@ export default function Dashboard({ onLogout }) {
 
   // Formulário: Cadastrar Nova Dívida / Acordo
   const [mostrarFormDivida, setMostrarFormDivida] = useState(false);
-  const [dividaBanco, setDividaBanco] = useState('Itaú Click');
+  const [dividaBanco, setDividaBanco] = useState('');
   const [dividaValorTotal, setDividaValorTotal] = useState('');
   const [dividaParcelasQtd, setDividaParcelasQtd] = useState('6');
   const [dividaValorParcela, setDividaValorParcela] = useState('');
+  const [dividaVencimento, setDividaVencimento] = useState(() => {
+    const d = new Date();
+    d.setDate(5);
+    return d.toISOString().split('T')[0];
+  });
   // Minimizar / Expandir Bloco da Dívida Itaú
   const [dividaItauMinimizada, setDividaItauMinimizada] = useState(true);
 
@@ -126,7 +131,7 @@ export default function Dashboard({ onLogout }) {
 
   // 2. Simulador de Amortização 13º
   const [mostrarSimulador13, setMostrarSimulador13] = useState(false);
-  const [valorSimulado13, setValorSimulado13] = useState(1935.43);
+  const [valorSimulado13, setValorSimulado13] = useState(1000);
 
   // 3. PWA Install Prompt
   const [deferredPrompt, setDeferredPrompt] = useState(null);
@@ -279,8 +284,8 @@ export default function Dashboard({ onLogout }) {
         setRendaExtraInput(res.data.perfil?.rendaExtraMes || 0);
         setMotivoRendaExtraInput(res.data.perfil?.motivoRendaExtra || '');
         setEmailInput(res.data.perfil?.email || '');
-        setWhatsappPhone(res.data.perfil?.whatsappPhone || '558195126839');
-        setWhatsappApiKey(res.data.perfil?.whatsappApiKey || '7939819');
+        setWhatsappPhone(res.data.perfil?.whatsappPhone || '');
+        setWhatsappApiKey(res.data.perfil?.whatsappApiKey || '');
         setNotificacoesWppAtivas(res.data.perfil?.notificacoesWppAtivas !== false);
         setDiaLembreteWpp(res.data.perfil?.diaLembreteWpp || 2);
       }
@@ -793,8 +798,8 @@ export default function Dashboard({ onLogout }) {
   const pctSaldoLivre = Math.max(0, 100 - (pctDividas + pctFixos + pctVariavel));
 
   // Amortização do 13º Salário
-  const valorParcelaBase = Number(summary.valorParcela || 1935.43);
-  const parcelasEliminadas = Math.max(0, Math.floor(valorSimulado13 / (valorParcelaBase || 1)));
+  const valorParcelaBase = Number(summary.valorParcela || (data.parcelas?.length > 0 ? data.parcelas[0].valor : 0));
+  const parcelasEliminadas = valorParcelaBase > 0 ? Math.max(0, Math.floor(valorSimulado13 / valorParcelaBase)) : 0;
   const economiaJurosEstimada = Math.round(parcelasEliminadas * valorParcelaBase * 0.28);
   const mesesAdiantados = parcelasEliminadas;
 
@@ -1274,39 +1279,60 @@ export default function Dashboard({ onLogout }) {
                         R$ 1.000 (Parcial)
                       </button>
 
-                      <button
-                        type="button"
-                        onClick={() => setValorSimulado13(1935.43)}
-                        style={{
-                          padding: '0.35rem 0.65rem',
-                          borderRadius: '6px',
-                          border: 'none',
-                          fontSize: '0.72rem',
-                          fontWeight: 600,
-                          cursor: 'pointer',
-                          background: valorSimulado13 === 1935.43 ? '#f59e0b' : 'rgba(255,255,255,0.06)',
-                          color: valorSimulado13 === 1935.43 ? '#000' : '#cbd5e1'
-                        }}
-                      >
-                        R$ 1.935,43 (1 Parcela)
-                      </button>
+                      {valorParcelaBase > 0 ? (
+                        <>
+                          <button
+                            type="button"
+                            onClick={() => setValorSimulado13(valorParcelaBase)}
+                            style={{
+                              padding: '0.35rem 0.65rem',
+                              borderRadius: '6px',
+                              border: 'none',
+                              fontSize: '0.72rem',
+                              fontWeight: 600,
+                              cursor: 'pointer',
+                              background: valorSimulado13 === valorParcelaBase ? '#f59e0b' : 'rgba(255,255,255,0.06)',
+                              color: valorSimulado13 === valorParcelaBase ? '#000' : '#cbd5e1'
+                            }}
+                          >
+                            {formatBRL(valorParcelaBase)} (1 Parcela)
+                          </button>
 
-                      <button
-                        type="button"
-                        onClick={() => setValorSimulado13(3870.86)}
-                        style={{
-                          padding: '0.35rem 0.65rem',
-                          borderRadius: '6px',
-                          border: 'none',
-                          fontSize: '0.72rem',
-                          fontWeight: 600,
-                          cursor: 'pointer',
-                          background: valorSimulado13 === 3870.86 ? '#f59e0b' : 'rgba(255,255,255,0.06)',
-                          color: valorSimulado13 === 3870.86 ? '#000' : '#cbd5e1'
-                        }}
-                      >
-                        R$ 3.870,86 (2 Parcelas!)
-                      </button>
+                          <button
+                            type="button"
+                            onClick={() => setValorSimulado13(valorParcelaBase * 2)}
+                            style={{
+                              padding: '0.35rem 0.65rem',
+                              borderRadius: '6px',
+                              border: 'none',
+                              fontSize: '0.72rem',
+                              fontWeight: 600,
+                              cursor: 'pointer',
+                              background: valorSimulado13 === (valorParcelaBase * 2) ? '#f59e0b' : 'rgba(255,255,255,0.06)',
+                              color: valorSimulado13 === (valorParcelaBase * 2) ? '#000' : '#cbd5e1'
+                            }}
+                          >
+                            {formatBRL(valorParcelaBase * 2)} (2 Parcelas!)
+                          </button>
+                        </>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => setValorSimulado13(2000)}
+                          style={{
+                            padding: '0.35rem 0.65rem',
+                            borderRadius: '6px',
+                            border: 'none',
+                            fontSize: '0.72rem',
+                            fontWeight: 600,
+                            cursor: 'pointer',
+                            background: valorSimulado13 === 2000 ? '#f59e0b' : 'rgba(255,255,255,0.06)',
+                            color: valorSimulado13 === 2000 ? '#000' : '#cbd5e1'
+                          }}
+                        >
+                          R$ 2.000
+                        </button>
+                      )}
                     </div>
 
                     <input
@@ -1470,7 +1496,15 @@ export default function Dashboard({ onLogout }) {
                         ▲ Recolher Parcelas
                       </button>
                       <button
-                        onClick={() => setMostrarFormDivida(!mostrarFormDivida)}
+                        onClick={() => {
+                          if (data.dividaItau) {
+                            setDividaBanco(data.dividaItau.banco || '');
+                            setDividaValorTotal(String(data.dividaItau.valorTotalAcordo || ''));
+                            setDividaParcelasQtd(String(data.dividaItau.quantidadeParcelas || data.parcelas?.length || '6'));
+                            setDividaValorParcela(String(data.dividaItau.valorParcela || ''));
+                          }
+                          setMostrarFormDivida(!mostrarFormDivida);
+                        }}
                         className="btn-secondary"
                         style={{ fontSize: '0.72rem' }}
                       >
@@ -1491,7 +1525,13 @@ export default function Dashboard({ onLogout }) {
                   Se você possui algum acordo de cartão, empréstimo ou parcelamento que quer liquidar, cadastre abaixo para gerenciar mês a mês.
                 </p>
                 <button
-                  onClick={() => setMostrarFormDivida(!mostrarFormDivida)}
+                  onClick={() => {
+                    setDividaBanco('');
+                    setDividaValorTotal('');
+                    setDividaParcelasQtd('6');
+                    setDividaValorParcela('');
+                    setMostrarFormDivida(!mostrarFormDivida);
+                  }}
                   className="btn-primary"
                   style={{ margin: '0 auto' }}
                 >

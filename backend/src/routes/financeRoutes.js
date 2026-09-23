@@ -42,7 +42,7 @@ function getUserEmail(req) {
   }
   if (req.headers['x-user-email']) return String(req.headers['x-user-email']).toLowerCase();
   if (req.query && req.query.userEmail) return String(req.query.userEmail).toLowerCase();
-  return 'vviniciuslourenco@gmail.com';
+  return null;
 }
 
 function computeSummary(data) {
@@ -103,6 +103,9 @@ function computeSummary(data) {
 router.get('/data', async (req, res) => {
   try {
     const userEmail = getUserEmail(req);
+    if (!userEmail) {
+      return res.status(401).json({ success: false, erro: 'Usuário não autenticado.' });
+    }
     const userRecord = await oracleAtp.getUser(userEmail);
     if (!userRecord || !userRecord.data) {
       return res.status(404).json({ success: false, erro: 'Dados do usuário não encontrados.' });
