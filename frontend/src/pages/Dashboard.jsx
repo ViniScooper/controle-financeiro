@@ -136,6 +136,7 @@ export default function Dashboard({ onLogout }) {
   // 3. PWA Install Prompt
   const [deferredPrompt, setDeferredPrompt] = useState(null);
   const [pwaInstalavel, setPwaInstalavel] = useState(false);
+  const [mostrarModalPwa, setMostrarModalPwa] = useState(false);
 
   useEffect(() => {
     const handler = (e) => {
@@ -149,13 +150,17 @@ export default function Dashboard({ onLogout }) {
 
   const handleInstalarPwa = async () => {
     if (deferredPrompt) {
-      deferredPrompt.prompt();
-      const { outcome } = await deferredPrompt.userChoice;
-      if (outcome === 'accepted') setPwaInstalavel(false);
-      setDeferredPrompt(null);
-    } else {
-      mostrarMensagem('Dica PWA: No iPhone, toque em Compartilhar > "Adicionar à Tela de Início".');
+      try {
+        deferredPrompt.prompt();
+        const { outcome } = await deferredPrompt.userChoice;
+        if (outcome === 'accepted') {
+          setPwaInstalavel(false);
+          setDeferredPrompt(null);
+          return;
+        }
+      } catch (e) {}
     }
+    setMostrarModalPwa(true);
   };
 
   // 4. Exportar Relatório em PDF / Imprimir
@@ -856,11 +861,18 @@ export default function Dashboard({ onLogout }) {
               </svg>
             )}
           </button>
-          {pwaInstalavel && (
-            <button onClick={handleInstalarPwa} className="btn-icon" title="Instalar App no Celular" style={{ color: '#10b981', borderColor: 'rgba(16,185,129,0.4)' }}>
-              📲
-            </button>
-          )}
+          <button 
+            onClick={handleInstalarPwa} 
+            className="btn-icon" 
+            title="Baixar App no Celular (iPhone / Android)" 
+            style={{ 
+              color: '#10b981', 
+              borderColor: 'rgba(16,185,129,0.4)',
+              background: 'rgba(16,185,129,0.12)'
+            }}
+          >
+            📲
+          </button>
           <button onClick={handleExportarRelatorio} className="btn-icon" title="Exportar Relatório / Imprimir PDF">📄</button>
           <button onClick={carregarDados} className="btn-icon" title="Sincronizar Oracle ATP">🔄</button>
           <button onClick={onLogout} className="btn-icon" title="Sair">🚪</button>
@@ -3301,6 +3313,176 @@ export default function Dashboard({ onLogout }) {
           <span className="nav-tab-label">Perfil</span>
         </button>
       </nav>
+
+      {/* MODAL TUTORIAL: INSTALAR PWA NO IPHONE E ANDROID */}
+      {mostrarModalPwa && (
+        <div 
+          style={{
+            position: 'fixed',
+            inset: 0,
+            background: 'rgba(0, 0, 0, 0.75)',
+            backdropFilter: 'blur(6px)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 9999,
+            padding: '1rem'
+          }}
+          onClick={() => setMostrarModalPwa(false)}
+        >
+          <div 
+            style={{
+              background: '#0f172a',
+              border: '1px solid rgba(16, 185, 129, 0.3)',
+              borderRadius: '20px',
+              maxWidth: '480px',
+              width: '100%',
+              padding: '1.5rem',
+              boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.5)',
+              maxHeight: '90vh',
+              overflowY: 'auto'
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Header */}
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
+                <div style={{
+                  width: '36px',
+                  height: '36px',
+                  borderRadius: '10px',
+                  background: 'rgba(16, 185, 129, 0.15)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  fontSize: '1.25rem'
+                }}>
+                  📲
+                </div>
+                <div>
+                  <h3 style={{ fontSize: '1.1rem', fontWeight: 700, color: '#fff', margin: 0 }}>
+                    Baixar o FinControl
+                  </h3>
+                  <p style={{ fontSize: '0.75rem', color: '#94a3b8', margin: 0 }}>
+                    Instale como aplicativo nativo sem ocupar memória
+                  </p>
+                </div>
+              </div>
+              <button 
+                onClick={() => setMostrarModalPwa(false)}
+                className="btn-del"
+                style={{ fontSize: '1rem', width: '32px', height: '32px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+              >
+                ✕
+              </button>
+            </div>
+
+            {/* Seção iPhone (iOS) */}
+            <div style={{
+              background: 'rgba(255, 255, 255, 0.03)',
+              border: '1px solid rgba(255, 255, 255, 0.08)',
+              borderRadius: '14px',
+              padding: '1rem',
+              marginBottom: '1rem'
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.75rem' }}>
+                <span style={{ fontSize: '1.2rem' }}>🍎</span>
+                <strong style={{ color: '#fff', fontSize: '0.9rem' }}>Como baixar no iPhone (iOS):</strong>
+              </div>
+
+              <div style={{ fontSize: '0.8rem', color: '#cbd5e1', lineHeight: 1.6, display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                <div style={{ display: 'flex', alignItems: 'flex-start', gap: '0.5rem' }}>
+                  <span style={{ background: '#3b82f6', color: '#fff', borderRadius: '50%', width: '20px', height: '20px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '0.7rem', fontWeight: 700, flexShrink: 0 }}>1</span>
+                  <span>Abra este link no navegador <strong>Safari</strong> do iPhone (não funciona pelo Chrome no iOS).</span>
+                </div>
+                <div style={{ display: 'flex', alignItems: 'flex-start', gap: '0.5rem' }}>
+                  <span style={{ background: '#3b82f6', color: '#fff', borderRadius: '50%', width: '20px', height: '20px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '0.7rem', fontWeight: 700, flexShrink: 0 }}>2</span>
+                  <span>Toque no botão <strong>Compartilhar</strong> (ícone de quadrado com uma setinha para cima <strong style={{ color: '#60a5fa' }}>📤</strong> na barra inferior do Safari).</span>
+                </div>
+                <div style={{ display: 'flex', alignItems: 'flex-start', gap: '0.5rem' }}>
+                  <span style={{ background: '#3b82f6', color: '#fff', borderRadius: '50%', width: '20px', height: '20px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '0.7rem', fontWeight: 700, flexShrink: 0 }}>3</span>
+                  <span>Role a lista para baixo e toque em <strong style={{ color: '#10b981' }}>"Adicionar à Tela de Início" ➕</strong>.</span>
+                </div>
+                <div style={{ display: 'flex', alignItems: 'flex-start', gap: '0.5rem' }}>
+                  <span style={{ background: '#3b82f6', color: '#fff', borderRadius: '50%', width: '20px', height: '20px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '0.7rem', fontWeight: 700, flexShrink: 0 }}>4</span>
+                  <span>No canto superior direito, toque em <strong>"Adicionar"</strong>. Pronto! O app fica na tela inicial.</span>
+                </div>
+              </div>
+            </div>
+
+            {/* Seção Android */}
+            <div style={{
+              background: 'rgba(255, 255, 255, 0.03)',
+              border: '1px solid rgba(255, 255, 255, 0.08)',
+              borderRadius: '14px',
+              padding: '1rem',
+              marginBottom: '1.25rem'
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.75rem' }}>
+                <span style={{ fontSize: '1.2rem' }}>🤖</span>
+                <strong style={{ color: '#fff', fontSize: '0.9rem' }}>Como baixar no Android (Google Chrome):</strong>
+              </div>
+
+              {deferredPrompt ? (
+                <button
+                  type="button"
+                  onClick={async () => {
+                    try {
+                      deferredPrompt.prompt();
+                      const { outcome } = await deferredPrompt.userChoice;
+                      if (outcome === 'accepted') {
+                        setPwaInstalavel(false);
+                        setDeferredPrompt(null);
+                        setMostrarModalPwa(false);
+                      }
+                    } catch (e) {}
+                  }}
+                  className="btn-primary"
+                  style={{ width: '100%', marginBottom: '0.6rem', textAlign: 'center', justifyContent: 'center' }}
+                >
+                  ⚡ Instalar Agora no Android (1 Clique)
+                </button>
+              ) : (
+                <div style={{ fontSize: '0.8rem', color: '#cbd5e1', lineHeight: 1.6 }}>
+                  Toque no menu de <strong>três pontinhos (⋮)</strong> no canto superior direito do Chrome e selecione <strong style={{ color: '#10b981' }}>"Instalar aplicativo"</strong> ou <strong>"Adicionar à tela inicial"</strong>.
+                </div>
+              )}
+            </div>
+
+            {/* Benefícios */}
+            <div style={{
+              display: 'grid',
+              gridTemplateColumns: '1fr 1fr',
+              gap: '0.5rem',
+              marginBottom: '1.25rem',
+              fontSize: '0.72rem',
+              color: '#94a3b8'
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
+                <span>⚡</span> Abre instantaneamente
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
+                <span>📱</span> Tela cheia sem abas
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
+                <span>🛡️</span> Funciona offline
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
+                <span>💾</span> Quase 0MB de espaço
+              </div>
+            </div>
+
+            <button
+              type="button"
+              onClick={() => setMostrarModalPwa(false)}
+              className="btn-secondary"
+              style={{ width: '100%', textAlign: 'center' }}
+            >
+              Entendi, fechar
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
