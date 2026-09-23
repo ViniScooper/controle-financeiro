@@ -51,3 +51,47 @@ self.addEventListener('fetch', (event) => {
     })
   );
 });
+
+// Listener de Notificação Push Nativa
+self.addEventListener('push', (event) => {
+  let payload = { title: 'FinControl - Alerta de Conta', body: 'Você tem faturas ou contas com vencimento próximo!' };
+  if (event.data) {
+    try {
+      payload = event.data.json();
+    } catch (e) {
+      payload = { title: 'FinControl', body: event.data.text() };
+    }
+  }
+
+  const options = {
+    body: payload.body,
+    icon: '/logo-192.png',
+    badge: '/logo-192.png',
+    vibrate: [200, 100, 200],
+    data: { url: payload.url || '/' },
+    actions: [
+      { action: 'open', title: 'Ver Contas' }
+    ]
+  };
+
+  event.waitUntil(
+    self.registration.showNotification(payload.title, options)
+  );
+});
+
+// Listener de Clique na Notificação
+self.addEventListener('notificationclick', (event) => {
+  event.notification.close();
+  event.waitUntil(
+    clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clientList) => {
+      for (const client of clientList) {
+        if ('focus' in client) {
+          return client.focus();
+        }
+      }
+      if (clients.openWindow) {
+        return clients.openWindow('/');
+      }
+    })
+  );
+});

@@ -163,9 +163,231 @@ export default function Dashboard({ onLogout }) {
     setMostrarModalPwa(true);
   };
 
-  // 4. Exportar Relatório em PDF / Imprimir
-  const handleExportarRelatorio = () => {
-    window.print();
+  // 4. Exportação Completa de Dados em Planilha (CSV / Excel)
+  const handleExportarCSV = () => {
+    try {
+      const separador = ';';
+      const linhas = [];
+
+      linhas.push(`RELATÓRIO FINANCEIRO FINCONTROL - ${data.perfil?.nome || 'Usuário'}`);
+      linhas.push(`Mês de Referência:;${mesAtivo}`);
+      linhas.push(`Data de Emissão:;${new Date().toLocaleDateString('pt-BR')} ${new Date().toLocaleTimeString('pt-BR')}`);
+      linhas.push('');
+
+      linhas.push('--- RESUMO FINANCEIRO GERAL ---');
+      linhas.push(`Renda Total:;R$ ${summary.rendaTotalMes.toFixed(2).replace('.', ',')}`);
+      linhas.push(`Total Comprometido (Dívida + Fixos):;R$ ${summary.totalComprometido.toFixed(2).replace('.', ',')}`);
+      linhas.push(`Gastos Diários:;R$ ${summary.totalVariavel.toFixed(2).replace('.', ',')}`);
+      linhas.push(`Saldo Livre Atual:;R$ ${summary.saldoLivreAtual.toFixed(2).replace('.', ',')}`);
+      linhas.push(`Saldo Devedor Restante de Dívidas:;R$ ${summary.saldoDevedorRestante.toFixed(2).replace('.', ',')}`);
+      linhas.push('');
+
+      linhas.push('--- GASTOS DIÁRIOS (DESPESAS VARIÁVEIS) ---');
+      linhas.push(['Data', 'Descrição', 'Categoria', 'Valor (R$)'].join(separador));
+      const variaveis = data.despesasVariaveis || [];
+      if (variaveis.length === 0) {
+        linhas.push('Nenhum gasto registrado;;;');
+      } else {
+        variaveis.forEach(d => {
+          linhas.push([
+            d.data || '',
+            `"${(d.descricao || '').replace(/"/g, '""')}"`,
+            `"${(d.categoria || '').replace(/"/g, '""')}"`,
+            Number(d.valor || 0).toFixed(2).replace('.', ',')
+          ].join(separador));
+        });
+      }
+      linhas.push('');
+
+      linhas.push('--- GASTOS FIXOS MENSAIS ---');
+      linhas.push(['Nome da Despesa', 'Categoria', 'Valor (R$)', 'Status'].join(separador));
+      const fixos = data.gastosFixos || [];
+      if (fixos.length === 0) {
+        linhas.push('Nenhum gasto fixo cadastrado;;;');
+      } else {
+        fixos.forEach(g => {
+          linhas.push([
+            `"${(g.nome || '').replace(/"/g, '""')}"`,
+            `"${(g.categoria || '').replace(/"/g, '""')}"`,
+            Number(g.valor || 0).toFixed(2).replace('.', ','),
+            g.pago ? 'PAGO' : 'PENDENTE'
+          ].join(separador));
+        });
+      }
+      linhas.push('');
+
+      linhas.push('--- FATURAS DE CARTÃO E CONTAS VARIÁVEIS ---');
+      linhas.push(['Fatura / Cartão', 'Vencimento', 'Mês Referência', 'Valor (R$)', 'Status', 'Observação'].join(separador));
+      const faturas = data.faturasCartoes || [];
+      if (faturas.length === 0) {
+        linhas.push('Nenhuma fatura cadastrada;;;;;');
+      } else {
+        faturas.forEach(f => {
+          linhas.push([
+            `"${(f.nome || '').replace(/"/g, '""')}"`,
+            f.vencimento || '',
+            `"${(f.mesReferencia || '').replace(/"/g, '""')}"`,
+            Number(f.valor || 0).toFixed(2).replace('.', ','),
+            f.paga ? 'PAGA' : 'PENDENTE',
+            `"${(f.observacao || '').replace(/"/g, '""')}"`
+          ].join(separador));
+        });
+      }
+      linhas.push('');
+
+      linhas.push('--- PARCELAS DE DÍVIDAS / ACORDOS ---');
+      linhas.push(['Parcela', 'Vencimento', 'Valor (R$)', 'Status', 'Data Pagamento', 'Observação'].join(separador));
+      const parcelas = data.parcelas || [];
+      if (parcelas.length === 0) {
+        linhas.push('Nenhuma dívida cadastrada;;;;;');
+      } else {
+        parcelas.forEach(p => {
+          linhas.push([
+            `${p.numero || p.id}ª Parcela`,
+            p.vencimento || '',
+            Number(p.valor || 0).toFixed(2).replace('.', ','),
+            p.paga ? 'PAGA' : 'PENDENTE',
+            p.dataPagamento || '-',
+            `"${(p.observacao || '').replace(/"/g, '""')}"`
+          ].join(separador));
+        });
+      }
+
+      // Adiciona BOM (\uFEFF) para garantir que caracteres acentuados funcionem perfeitamente no Excel
+      const conteudoCsv = '\uFEFF' + linhas.join('\r\n');
+      const blob = new Blob([conteudoCsv], { type: 'text/csv;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.setAttribute('href', url);
+      link.setAttribute('download', `fincontrol_extrato_${mesAtivo}_${new Date().toISOString().split('T')[0]}.csv`);
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+
+      mostrarMensagem('Planilha de dados (CSV) exportada com sucesso!');
+    } catch (e) {
+      console.error('Erro ao exportar CSV:', e);
+      mostrarMensagem('Erro ao exportar dados.');
+    }
+  };
+
+  // 5. Notificações Nativas Web Push (Sem depender de terceiros / CallMeBot)
+  const [pushPermissao, setPushPermissao] = useState(() => {
+    return typeof Notification !== 'undefined' ? Notification.permission : 'denied';
+  });
+
+  const dispararNotificacaoNativa = (titulo, corpo, tag = '') => {
+    if (typeof Notification === 'undefined' || Notification.permission !== 'granted') return;
+    
+    const options = {
+      body: corpo,
+      icon: '/logo-192.png',
+      badge: '/logo-192.png',
+      vibrate: [200, 100, 200],
+      tag: tag || undefined,
+      renotify: true
+    };
+
+    if ('serviceWorker' in navigator && navigator.serviceWorker.controller) {
+      navigator.serviceWorker.ready.then((reg) => {
+        reg.showNotification(titulo, options);
+      }).catch(() => {
+        try { new Notification(titulo, options); } catch (e) {}
+      });
+    } else {
+      try { new Notification(titulo, options); } catch (e) {}
+    }
+  };
+
+  const verificarLembretesVencimento = (dadosFinanceiros) => {
+    if (typeof Notification === 'undefined' || Notification.permission !== 'granted') return;
+
+    const hoje = new Date();
+    hoje.setHours(0, 0, 0, 0);
+
+    // 1. Faturas de cartão
+    const faturas = dadosFinanceiros?.faturasCartoes || [];
+    faturas.filter(f => !f.paga && f.vencimento).forEach(f => {
+      const [ano, mes, dia] = f.vencimento.split('-').map(Number);
+      const dataVenc = new Date(ano, mes - 1, dia);
+      const diffMs = dataVenc - hoje;
+      const diffDias = Math.round(diffMs / (1000 * 60 * 60 * 24));
+
+      if (diffDias >= 0 && diffDias <= 2) {
+        const diaTexto = diffDias === 0 ? 'VENCE HOJE!' : diffDias === 1 ? 'vence AMANHÃ!' : `vence em 2 dias!`;
+        dispararNotificacaoNativa(
+          `💳 Fatura ${f.nome} ${diaTexto}`,
+          `A fatura de R$ ${Number(f.valor).toFixed(2).replace('.', ',')} vence no dia ${f.vencimento.split('-').reverse().join('/')}. Clique para conferir.`,
+          `fatura-${f.id || f.nome}-${f.vencimento}`
+        );
+      } else if (diffDias < 0) {
+        dispararNotificacaoNativa(
+          `🚨 Fatura ${f.nome} em atraso!`,
+          `Venceu dia ${f.vencimento.split('-').reverse().join('/')} (R$ ${Number(f.valor).toFixed(2).replace('.', ',')}).`,
+          `fatura-atrasada-${f.id || f.nome}`
+        );
+      }
+    });
+
+    // 2. Próxima Parcela de Dívida
+    const parcelas = dadosFinanceiros?.parcelas || [];
+    const proxParcela = parcelas.find(p => !p.paga && p.vencimento);
+    if (proxParcela) {
+      const [ano, mes, dia] = proxParcela.vencimento.split('-').map(Number);
+      const dataVenc = new Date(ano, mes - 1, dia);
+      const diffMs = dataVenc - hoje;
+      const diffDias = Math.round(diffMs / (1000 * 60 * 60 * 24));
+
+      if (diffDias >= 0 && diffDias <= 2) {
+        const diaTexto = diffDias === 0 ? 'VENCE HOJE!' : diffDias === 1 ? 'vence AMANHÃ!' : `vence em 2 dias!`;
+        dispararNotificacaoNativa(
+          `💳 Parcela ${proxParcela.numero}ª de Acordo ${diaTexto}`,
+          `Parcela de R$ ${Number(proxParcela.valor).toFixed(2).replace('.', ',')} vence em ${proxParcela.vencimento.split('-').reverse().join('/')}.`,
+          `parcela-${proxParcela.id || proxParcela.numero}`
+        );
+      }
+    }
+  };
+
+  const handleAtivarNotificacoes = async () => {
+    if (typeof Notification === 'undefined') {
+      mostrarMensagem('Seu navegador atual não suporta notificações nativas.');
+      return;
+    }
+
+    try {
+      const perm = await Notification.requestPermission();
+      setPushPermissao(perm);
+      if (perm === 'granted') {
+        dispararNotificacaoNativa(
+          '🔔 Notificações Ativadas no FinControl!',
+          'Você receberá alertas automáticos sempre que uma fatura ou parcela estiver próxima do vencimento.',
+          'welcome-notification'
+        );
+        mostrarMensagem('Notificações no celular ativadas com sucesso!');
+        verificarLembretesVencimento(data);
+      } else if (perm === 'denied') {
+        mostrarMensagem('Notificações bloqueadas no navegador. Para ativar, libere nas configurações do site.');
+      }
+    } catch (e) {
+      console.warn('Erro ao solicitar permissão de notificação:', e);
+    }
+  };
+
+  const handleTestarNotificacao = () => {
+    if (pushPermissao !== 'granted') {
+      handleAtivarNotificacoes();
+      return;
+    }
+    const faturasP = (data.faturasCartoes || []).filter(f => !f.paga);
+    const faturaExemplo = faturasP[0] || { nome: 'PicPay', valor: 600 };
+    dispararNotificacaoNativa(
+      `🚨 FinControl: Fatura ${faturaExemplo.nome} vence em 2 dias!`,
+      `Alerta de teste: R$ ${Number(faturaExemplo.valor).toFixed(2).replace('.', ',')} com vencimento próximo. Toque para acessar!`,
+      'test-notification'
+    );
+    mostrarMensagem('Notificação nativa enviada ao seu aparelho!');
   };
 
   // 5. Gestão de Pedidos de Reset de Senha (Administrador)
@@ -293,6 +515,7 @@ export default function Dashboard({ onLogout }) {
         setWhatsappApiKey(res.data.perfil?.whatsappApiKey || '');
         setNotificacoesWppAtivas(res.data.perfil?.notificacoesWppAtivas !== false);
         setDiaLembreteWpp(res.data.perfil?.diaLembreteWpp || 2);
+        verificarLembretesVencimento(res.data);
       }
     } catch (err) {
       setSyncStatus('Local (Offline)');
@@ -873,7 +1096,22 @@ export default function Dashboard({ onLogout }) {
           >
             📲
           </button>
-          <button onClick={handleExportarRelatorio} className="btn-icon" title="Exportar Relatório / Imprimir PDF">📄</button>
+          <button 
+            onClick={handleExportarCSV} 
+            className="btn-icon" 
+            title="Exportar Planilha Completa (Excel / CSV)"
+            style={{ color: '#38bdf8', borderColor: 'rgba(56,189,248,0.4)', background: 'rgba(56,189,248,0.08)' }}
+          >
+            📊
+          </button>
+          <button 
+            onClick={pushPermissao === 'granted' ? handleTestarNotificacao : handleAtivarNotificacoes} 
+            className="btn-icon" 
+            title={pushPermissao === 'granted' ? 'Notificações Ativas no Celular (Toque para testar alerta)' : 'Ativar Notificações no Celular / Navegador'}
+            style={pushPermissao === 'granted' ? { color: '#fbbf24', borderColor: 'rgba(251,191,36,0.4)', background: 'rgba(251,191,36,0.1)' } : { color: '#94a3b8' }}
+          >
+            {pushPermissao === 'granted' ? '🔔' : '🔕'}
+          </button>
           <button onClick={carregarDados} className="btn-icon" title="Sincronizar Oracle ATP">🔄</button>
           <button onClick={onLogout} className="btn-icon" title="Sair">🚪</button>
         </div>
@@ -3233,6 +3471,78 @@ export default function Dashboard({ onLogout }) {
                   </button>
                 </form>
               </div>
+            </section>
+
+            {/* SEÇÃO: NOTIFICAÇÕES NATIVAS NO CELULAR (SEM WHATSAPP) */}
+            <section className="card" style={{ borderLeft: '4px solid #f59e0b' }}>
+              <div className="card-header">
+                <div>
+                  <div className="card-title" style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', color: '#fbbf24' }}>
+                    <span>🔔</span> Notificações Nativas no Celular / Desktop
+                  </div>
+                  <div className="card-subtitle">
+                    Alertas do próprio navegador/celular quando contas e faturas (PicPay) estiverem a vencer
+                  </div>
+                </div>
+                <span className="badge-tag" style={{
+                  color: pushPermissao === 'granted' ? '#10b981' : '#f59e0b',
+                  borderColor: pushPermissao === 'granted' ? 'rgba(16,185,129,0.4)' : 'rgba(245,158,11,0.4)'
+                }}>
+                  {pushPermissao === 'granted' ? 'Ativadas ✅' : 'Desativadas 🔕'}
+                </span>
+              </div>
+
+              <p style={{ fontSize: '0.78rem', color: '#94a3b8', lineHeight: 1.5, marginBottom: '0.85rem' }}>
+                O FinControl avisa você proativamente quando suas faturas de cartão ou parcelas de dívida estiverem a <strong>2 dias do vencimento</strong> ou no dia do vencimento, sem você precisar abrir o WhatsApp.
+              </p>
+
+              <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+                {pushPermissao !== 'granted' ? (
+                  <button
+                    type="button"
+                    onClick={handleAtivarNotificacoes}
+                    className="btn-primary"
+                    style={{ fontSize: '0.8rem', padding: '0.5rem 1rem' }}
+                  >
+                    🔔 Ativar Notificações no Celular
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={handleTestarNotificacao}
+                    className="btn-primary"
+                    style={{ fontSize: '0.8rem', padding: '0.5rem 1rem', background: '#f59e0b' }}
+                  >
+                    ⚡ Testar Notificação na Tela Agora
+                  </button>
+                )}
+              </div>
+            </section>
+
+            {/* SEÇÃO: EXPORTAR PLANILHA COMPLETA (CSV / EXCEL) */}
+            <section className="card" style={{ borderLeft: '4px solid #38bdf8' }}>
+              <div className="card-header">
+                <div>
+                  <div className="card-title" style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', color: '#38bdf8' }}>
+                    <span>📊</span> Exportação de Dados Financeiros
+                  </div>
+                  <div className="card-subtitle">
+                    Baixe apenas os dados em planilha formatada para Microsoft Excel ou Google Sheets
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleExportarCSV}
+                  className="btn-primary"
+                  style={{ fontSize: '0.78rem', padding: '0.45rem 0.85rem', background: '#0284c7' }}
+                >
+                  📥 Baixar CSV (Excel)
+                </button>
+              </div>
+
+              <p style={{ fontSize: '0.78rem', color: '#94a3b8', lineHeight: 1.5 }}>
+                Gera um arquivo <code>.csv</code> com resumo do mês, gastos diários categorizados, despesas fixas, faturas de cartão e status das parcelas de dívidas.
+              </p>
             </section>
 
             <section className="card">
