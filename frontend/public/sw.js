@@ -1,9 +1,11 @@
 // Service Worker para FinControl PWA
-const CACHE_NAME = 'fincontrol-pwa-v1';
+const CACHE_NAME = 'fincontrol-pwa-v2';
 const ASSETS_TO_CACHE = [
   '/',
   '/index.html',
+  '/logo.svg',
   '/logo.png',
+  '/logo-192.png',
   '/manifest.json'
 ];
 

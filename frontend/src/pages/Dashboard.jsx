@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import api, { DEFAULT_FINANCE_STATE, calculateFinancialSummary } from '../services/api';
 
-function formatBRL(val) {
+function formatBRLGlobal(val) {
   const num = Number(val) || 0;
   return num.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 }
@@ -17,6 +17,24 @@ function formatDate(dateStr) {
 
 export default function Dashboard({ onLogout }) {
   const [activeTab, setActiveTab] = useState('dashboard'); // 'dashboard' | 'gastos' | 'fixos' | 'metas' | 'perfil'
+
+  // Modo Privacidade (Esconder Saldos / Valores)
+  const [ocultarSaldos, setOcultarSaldos] = useState(() => {
+    return localStorage.getItem('fincontrol_ocultar_saldos') === 'true';
+  });
+
+  const toggleOcultarSaldos = () => {
+    setOcultarSaldos(prev => {
+      const next = !prev;
+      localStorage.setItem('fincontrol_ocultar_saldos', String(next));
+      return next;
+    });
+  };
+
+  const formatBRL = (val) => {
+    if (ocultarSaldos) return 'R$ ••••••';
+    return formatBRLGlobal(val);
+  };
 
   const [data, setData] = useState(() => {
     const cached = localStorage.getItem('finance_cached_data');
@@ -810,6 +828,29 @@ export default function Dashboard({ onLogout }) {
         </div>
 
         <div className="topbar-actions">
+          {/* Botão de Ocultar / Exibir Saldos */}
+          <button
+            onClick={toggleOcultarSaldos}
+            className="btn-icon"
+            title={ocultarSaldos ? "Exibir Saldos e Valores" : "Ocultar Saldos (Modo Privacidade)"}
+            style={{
+              color: ocultarSaldos ? '#fbbf24' : '#10b981',
+              borderColor: ocultarSaldos ? 'rgba(251,191,36,0.4)' : 'rgba(16,185,129,0.3)',
+              background: ocultarSaldos ? 'rgba(251,191,36,0.12)' : 'rgba(16,185,129,0.08)'
+            }}
+          >
+            {ocultarSaldos ? (
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"></path>
+                <line x1="1" y1="1" x2="23" y2="23"></line>
+              </svg>
+            ) : (
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path>
+                <circle cx="12" cy="12" r="3"></circle>
+              </svg>
+            )}
+          </button>
           {pwaInstalavel && (
             <button onClick={handleInstalarPwa} className="btn-icon" title="Instalar App no Celular" style={{ color: '#10b981', borderColor: 'rgba(16,185,129,0.4)' }}>
               📲
@@ -960,10 +1001,47 @@ export default function Dashboard({ onLogout }) {
           <>
             {/* Card Saldo Livre Destaque */}
             <section className="hero-card">
-              <div className="hero-label">
-                <span>✨</span> Saldo Livre Restante do Mês
+              <div className="hero-label" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                  <span>✨</span> Saldo Livre Restante do Mês
+                </div>
+                <button
+                  onClick={toggleOcultarSaldos}
+                  style={{
+                    background: 'rgba(255,255,255,0.08)',
+                    border: '1px solid rgba(255,255,255,0.15)',
+                    color: ocultarSaldos ? '#fbbf24' : '#cbd5e1',
+                    borderRadius: '8px',
+                    padding: '0.2rem 0.55rem',
+                    fontSize: '0.75rem',
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '0.35rem',
+                    transition: 'all 0.2s'
+                  }}
+                  title={ocultarSaldos ? "Clique para exibir saldos" : "Clique para ocultar saldos"}
+                >
+                  {ocultarSaldos ? (
+                    <>
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"></path>
+                        <line x1="1" y1="1" x2="23" y2="23"></line>
+                      </svg>
+                      <span>Oculto</span>
+                    </>
+                  ) : (
+                    <>
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path>
+                        <circle cx="12" cy="12" r="3"></circle>
+                      </svg>
+                      <span>Visível</span>
+                    </>
+                  )}
+                </button>
               </div>
-              <div className="hero-value">
+              <div className="hero-value" style={ocultarSaldos ? { letterSpacing: '4px' } : {}}>
                 {formatBRL(saldoLivreReal)}
               </div>
 

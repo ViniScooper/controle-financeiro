@@ -34,10 +34,10 @@ export default function Navbar() {
     return (
         <nav className="navbar-container" style={{ ...styles.nav, ...(scrolled ? styles.navScrolled : {}) }}>
             <Link to="/" style={styles.logo} onClick={fecharMenu}>
-                <img src="/logo.png" alt="Logo Boteco do Sivirino" style={styles.logoImg} />
+                <img src="/logo.png" alt="Logo FinControl" style={styles.logoImg} />
                 <div className="navbar-logo-textos" style={styles.logoTextos}>
-                    <span style={styles.logoNome}>Boteco do Sivirino</span>
-                    <span className="navbar-logo-slogan" style={styles.logoSlogan}>Comida Arretada & Cerveja Gelada</span>
+                    <span style={styles.logoNome}>FinControl</span>
+                    <span className="navbar-logo-slogan" style={styles.logoSlogan}>Gestão Financeira & Dívidas</span>
                 </div>
             </Link>
 
