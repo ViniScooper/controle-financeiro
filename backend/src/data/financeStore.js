@@ -6,14 +6,14 @@ const DATA_FILE = path.join(DATA_DIR, 'finance_data.json');
 
 const INITIAL_DATA = {
   perfil: {
-    nome: "José Vinícius Lourenço Marques de Sousa",
-    cidade: "Recife, PE",
-    email: "vviniciuslourenco@gmail.com",
-    senha: "123",
+    nome: process.env.ADMIN_NAME || "Administrador",
+    cidade: "Brasil",
+    email: process.env.ADMIN_EMAIL || "admin@controlefinanceiro.com",
+    senha: "admin",
     rendaLiquida: 4400.00,
     rendaExtraMes: 0.00,
     motivoRendaExtra: "",
-    meta: "Quitação total do acordo Itaú Click e controle rigoroso de gastos"
+    meta: "Controle financeiro pessoal e quitação de despesas"
   },
   dividaItau: {
     banco: "Itaú Click",
@@ -184,8 +184,8 @@ function getData() {
     if (parsed.perfil && parsed.perfil.rendaExtraMes === undefined) {
       parsed.perfil.rendaExtraMes = 0;
       parsed.perfil.motivoRendaExtra = "";
-      parsed.perfil.email = "vviniciuslourenco@gmail.com";
-      parsed.perfil.senha = "123";
+      parsed.perfil.email = process.env.ADMIN_EMAIL || "admin@controlefinanceiro.com";
+      parsed.perfil.senha = "admin";
     }
     return parsed;
   } catch (err) {

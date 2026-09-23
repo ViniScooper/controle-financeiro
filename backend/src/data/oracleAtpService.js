@@ -2,7 +2,7 @@ const https = require('https');
 const fs = require('fs');
 const path = require('path');
 
-const ORDS_HOST = process.env.ORDS_HOST || 'G31AC88BC331093-CLOUDOPSHUB.adb.sa-saopaulo-1.oraclecloudapps.com';
+const ORDS_HOST = process.env.ORDS_HOST || '';
 const ORDS_PATH = process.env.ORDS_PATH || '/ords/admin/_/sql';
 const ORDS_AUTH = process.env.ORDS_AUTH || '';
 
@@ -121,8 +121,9 @@ function loadLocalUsers() {
       return JSON.parse(fs.readFileSync(LOCAL_USERS_FILE, 'utf8'));
     }
   } catch (e) {}
+  const adminMail = (process.env.ADMIN_EMAIL || 'admin@controlefinanceiro.com').toLowerCase();
   return {
-    "vviniciuslourenco@gmail.com": VINI_INITIAL_DATA
+    [adminMail]: ADMIN_INITIAL_DATA
   };
 }
 
@@ -191,11 +192,7 @@ async function getUser(email) {
       
       // Garante faturasCartoes
       if (!dataObj.faturasCartoes) {
-        if (cleanEmail === 'vviniciuslourenco@gmail.com' || cleanEmail.includes('vinicius')) {
-          dataObj.faturasCartoes = VINI_INITIAL_DATA.faturasCartoes;
-        } else {
-          dataObj.faturasCartoes = [];
-        }
+        dataObj.faturasCartoes = [];
       }
 
       // Garante dados WhatsApp
@@ -235,7 +232,7 @@ async function getUser(email) {
 
   // Se for o admin ou usuário com padrão, inicializa
   const adminEmail = (process.env.ADMIN_EMAIL || 'admin@controlefinanceiro.com').toLowerCase();
-  if (cleanEmail === adminEmail || cleanEmail.includes('admin') || cleanEmail.includes('vinicius') || cleanEmail === 'vviniciuslourenco@gmail.com') {
+  if (cleanEmail === adminEmail || cleanEmail.includes('admin')) {
     await saveUser(cleanEmail, ADMIN_INITIAL_DATA.perfil.nome, ADMIN_INITIAL_DATA.perfil.senha, ADMIN_INITIAL_DATA);
     return {
       email: cleanEmail,

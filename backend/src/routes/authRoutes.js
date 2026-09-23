@@ -3,7 +3,7 @@ const router = express.Router();
 const jwt = require('jsonwebtoken');
 const oracleAtp = require('../data/oracleAtpService');
 
-const JWT_SECRET = process.env.JWT_SECRET || 'chave_secreta_financeiro_vinicius_2026';
+const JWT_SECRET = process.env.JWT_SECRET || 'fincontrol_jwt_secret_key_default';
 
 // POST /api/auth/login
 router.post('/login', async (req, res) => {
@@ -115,7 +115,7 @@ function isAdminUser(email) {
   const em = String(email).toLowerCase();
   const configuredAdmin = (process.env.ADMIN_EMAIL || '').toLowerCase();
   if (configuredAdmin && em === configuredAdmin) return true;
-  return em.includes('admin') || em.includes('vinicius') || em === 'vviniciuslourenco@gmail.com';
+  return em.includes('admin');
 }
 
 // Função auxiliar CallMeBot para alertar o administrador

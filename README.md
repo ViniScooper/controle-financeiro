@@ -148,22 +148,14 @@ O Nginx balanceará as requisições entre o frontend e a API.
 
 ## ⚙️ Variáveis de Ambiente
 
-### Backend (`backend/.env`)
-| Variável | Descrição | Exemplo |
-| :--- | :--- | :--- |
-| `PORT` | Porta de escuta da API | `3001` |
-| `JWT_SECRET` | Chave criptográfica para tokens JWT | `sua_chave_secreta_jwt` |
-| `ORDS_HOST` | Host do Oracle ATP ORDS | `seu-ords-host.oraclecloudapps.com` |
-| `ORDS_PATH` | Endpoint SQL do ORDS | `/ords/admin/_/sql` |
-| `ORDS_AUTH` | Credencial em Base64 para o banco | `Buffer.from('USER:PASS').toString('base64')` |
-| `ADMIN_WHATSAPP_PHONE` | Telefone com DDI para receber alertas do sistema | `5511999999999` |
-| `CALLMEBOT_API_KEY` | Chave de API da plataforma CallMeBot | `1234567` |
-| `ADMIN_EMAIL` | E-mail do usuário administrador | `admin@exemplo.com` |
+> 🔒 **Segurança:** O arquivo `.env` com suas credenciais reais **nunca** é enviado ao Git (bloqueado no `.gitignore`). Para configurar o projeto em um novo ambiente, copie o arquivo de modelo `backend/.env.example` para `backend/.env` e preencha as chaves:
 
-### Frontend (`frontend/.env.local`)
-| Variável | Descrição | Exemplo |
-| :--- | :--- | :--- |
-| `VITE_API_URL` | URL base do backend em execução | `http://localhost:3001` |
+* `PORT`: Porta do servidor backend (padrão: 3001)
+* `JWT_SECRET`: Chave secreta aleatória para assinatura de tokens JWT
+* `ORDS_HOST` / `ORDS_PATH` / `ORDS_AUTH`: Parâmetros de conexão com o banco de dados Oracle ATP (ORDS REST)
+* `ADMIN_EMAIL`: E-mail do administrador do sistema
+* `ADMIN_WHATSAPP_PHONE` / `CALLMEBOT_API_KEY`: Credenciais para disparo de alertas WhatsApp
+* `VITE_API_URL`: URL base da API no frontend (`frontend/.env.local`)
 
 ---
 

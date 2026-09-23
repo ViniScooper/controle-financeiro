@@ -4,7 +4,7 @@ const jwt = require('jsonwebtoken');
 const https = require('https');
 const oracleAtp = require('../data/oracleAtpService');
 
-const JWT_SECRET = process.env.JWT_SECRET || 'chave_secreta_financeiro_vinicius_2026';
+const JWT_SECRET = process.env.JWT_SECRET || 'fincontrol_jwt_secret_key_default';
 
 // Dispara mensagem no WhatsApp via CallMeBot
 function sendCallMeBot(phone, apiKey, message) {
@@ -828,33 +828,34 @@ setInterval(async () => {
 
     // Dispara uma vez ao dia pela manhã (a partir das 09h)
     if (horaAtual >= 9 && lastAlertDate !== hojeStr) {
-      const user = await oracleAtp.getUser('vviniciuslourenco@gmail.com');
-      if (user && user.data?.perfil?.notificacoesWppAtivas) {
-        const diaProgramado = Number(user.data.perfil.diaLembreteWpp) || 2;
-        if (diaAtual === diaProgramado) {
-          lastAlertDate = hojeStr;
-          const phone = user.data.perfil.whatsappPhone || '558195126839';
-          const apiKey = user.data.perfil.whatsappApiKey || '7939819';
-          
-          const proxParcela = (user.data.parcelas || []).find(p => !p.paga);
-          const faturasP = (user.data.faturasCartoes || []).filter(f => !f.paga);
-          
-          let detalhes = '';
-          if (proxParcela) detalhes += `💳 *Itaú Click:* R$ ${Number(proxParcela.valor).toFixed(2).replace('.', ',')} (Vence dia 05)\n`;
-          faturasP.forEach(f => {
-            detalhes += `💳 *${f.nome}:* R$ ${Number(f.valor).toFixed(2).replace('.', ',')} (Vence dia ${f.vencimento ? f.vencimento.split('-')[2] : '19'})\n`;
-          });
+      const adminEmail = (process.env.ADMIN_EMAIL || '').toLowerCase();
+      if (adminEmail) {
+        const user = await oracleAtp.getUser(adminEmail);
+        if (user && user.data?.perfil?.notificacoesWppAtivas) {
+          const diaProgramado = Number(user.data.perfil.diaLembreteWpp) || 2;
+          if (diaAtual === diaProgramado) {
+            lastAlertDate = hojeStr;
+            const phone = user.data.perfil.whatsappPhone || process.env.ADMIN_WHATSAPP_PHONE;
+            const apiKey = user.data.perfil.whatsappApiKey || process.env.CALLMEBOT_API_KEY;
+            
+            const proxParcela = (user.data.parcelas || []).find(p => !p.paga);
+            const faturasP = (user.data.faturasCartoes || []).filter(f => !f.paga);
+            
+            let detalhes = '';
+            if (proxParcela) detalhes += `💳 *Parcela:* R$ ${Number(proxParcela.valor).toFixed(2).replace('.', ',')} (Vence dia 05)\n`;
+            faturasP.forEach(f => {
+              detalhes += `💳 *${f.nome}:* R$ ${Number(f.valor).toFixed(2).replace('.', ',')} (Vence dia ${f.vencimento ? f.vencimento.split('-')[2] : '19'})\n`;
+            });
 
-          const msg = `🚨 *LEMBRETE DO DIA ${String(diaProgramado).padStart(2, '0')} - PAGAMENTO DE FATURAS*\n\n` +
-            `Olá, Vinícius! Lembrete para planejar suas contas deste mês:\n\n` +
-            detalhes + `\n` +
-            `👉 *Acesse o painel para conferir e marcar se já foram pagas:*\n` +
-            `🔗 https://controle-financeiro-mauve-two.vercel.app/\n` +
-            `👤 *Login:* vviniciuslourenco@gmail.com\n` +
-            `🔑 *Senha:* ${user.data.perfil.senha || '123'}`;
+            const msg = `🚨 *LEMBRETE DO DIA ${String(diaProgramado).padStart(2, '0')} - PAGAMENTO DE FATURAS*\n\n` +
+              `Olá, ${user.data.perfil.nome || 'Usuário'}! Lembrete para planejar suas contas deste mês:\n\n` +
+              detalhes + `\n` +
+              `👉 *Acesse o painel para conferir e marcar se já foram pagas:*\n` +
+              `🔗 ${process.env.APP_URL || 'https://fincontrol.vercel.app'}`;
 
-          await sendCallMeBot(phone, apiKey, msg);
-          console.log('[WhatsApp Cron] Lembrete automático enviado para Vinícius!');
+            await sendCallMeBot(phone, apiKey, msg);
+            console.log('[WhatsApp Cron] Lembrete automático enviado via CallMeBot!');
+          }
         }
       }
     }
