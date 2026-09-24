@@ -1,0 +1,21 @@
+version: '3.8'
+
+services:
+  financeiro_backend:
+    container_name: financeiro_backend
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    ports:
+      - "3006:3006"
+    environment:
+      - NODE_ENV=production
+      - PORT=3006
+    volumes:
+      - /home/ubuntu/controle_financeiro_backend/data:/app/data
+    deploy:
+      resources:
+        limits:
+          memory: 128M
+    mem_limit: 128m
