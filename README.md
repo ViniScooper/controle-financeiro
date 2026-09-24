@@ -166,6 +166,9 @@ O Nginx balanceará as requisições entre o frontend e a API.
 
 ---
 
-## 📄 Licença
+## 📄 Licença & Propriedade Intelectual
 
-Este projeto está sob a licença [MIT](LICENSE). Sinta-se livre para usar, estudar e contribuir.
+Este projeto está protegido sob **Licença de Software Proprietário com Restrição Comercial**.
+* **Copyright © 2026 José Vinícius Lourenço Marques de Sousa.** Todos os direitos reservados.
+* **Proibição Comercial Estrita:** É expressamente proibida a venda, revenda, comercialização ou distribuição comercial deste software ou derivados sem autorização prévia por escrito e contrato com o autor.
+* Para mais detalhes, consulte o arquivo [LICENSE](LICENSE).
