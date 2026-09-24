@@ -221,8 +221,29 @@ router.post('/approve-request', async (req, res) => {
     const reqItem = result.request;
     const tempPass = result.tempPassword;
 
+// Helper para normalizar número de WhatsApp brasileiro e gerar link wa.me correto
+function normalizeWhatsAppNumber(rawPhone) {
+  if (!rawPhone) return '';
+  let clean = String(rawPhone).replace(/\D/g, '');
+  if (!clean) return '';
+  // Remove zero à esquerda (ex: 081999938318 -> 81999938318)
+  clean = clean.replace(/^0+/, '');
+  // Se tiver 10 (fixo) ou 11 dígitos (celular com DDD), prefixa DDI 55 (Brasil)
+  if (clean.length === 10 || clean.length === 11) {
+    clean = '55' + clean;
+  }
+  return clean;
+}
+
+function buildWhatsAppLink(rawPhone, messageText = '') {
+  const clean = normalizeWhatsAppNumber(rawPhone);
+  if (!clean) return '';
+  const query = messageText ? `?text=${encodeURIComponent(messageText)}` : '';
+  return `https://wa.me/${clean}${query}`;
+}
+
     // Gera o link do WhatsApp para falar diretamente com o usuário
-    const cleanWpp = String(reqItem.whatsapp || '').replace(/\D/g, '');
+    const cleanWpp = normalizeWhatsAppNumber(reqItem.whatsapp);
     const msgParaUsuario = `Olá, ${reqItem.name}! 🚀\n\n` +
       `Seu acesso ao *Controle Financeiro* foi aprovado com sucesso!\n\n` +
       `🔗 *Acesse o painel:* https://controle-financeiro-mauve-two.vercel.app/\n` +
@@ -230,13 +251,14 @@ router.post('/approve-request', async (req, res) => {
       `🔑 *Sua Senha Temporária:* ${tempPass}\n\n` +
       `⚠️ *Importante:* No seu primeiro acesso, vá na aba *Perfil* e altere para a sua senha pessoal definitiva!`;
 
-    const waLink = `https://wa.me/${cleanWpp}?text=${encodeURIComponent(msgParaUsuario)}`;
+    const waLink = buildWhatsAppLink(cleanWpp, msgParaUsuario);
 
     return res.json({
       success: true,
       mensagem: `Usuário ${reqItem.name} aprovado com sucesso!`,
       tempPassword: tempPass,
       waLink,
+      whatsappNormalizado: cleanWpp,
       request: reqItem
     });
   } catch (err) {
@@ -343,7 +365,7 @@ router.post('/approve-password-reset', async (req, res) => {
     const resetItem = result.reset;
     const tempPass = result.tempPassword;
 
-    const cleanWpp = String(resetItem.whatsapp || '').replace(/\D/g, '');
+    const cleanWpp = normalizeWhatsAppNumber(resetItem.whatsapp);
     const msgParaUsuario = `Olá, ${resetItem.name || 'Usuário'}! 🔐\n\n` +
       `Sua senha do *Controle Financeiro* foi redefinida com sucesso!\n\n` +
       `🔗 *Acesse o painel:* https://controle-financeiro-mauve-two.vercel.app/\n` +
@@ -351,13 +373,14 @@ router.post('/approve-password-reset', async (req, res) => {
       `🔑 *Sua Nova Senha Temporária:* ${tempPass}\n\n` +
       `⚠️ *Importante:* No seu acesso, altere para a sua nova senha pessoal na aba *Perfil*!`;
 
-    const waLink = `https://wa.me/${cleanWpp}?text=${encodeURIComponent(msgParaUsuario)}`;
+    const waLink = buildWhatsAppLink(cleanWpp, msgParaUsuario);
 
     return res.json({
       success: true,
       mensagem: `Senha de ${resetItem.name || resetItem.email} redefinida com sucesso!`,
       tempPassword: tempPass,
       waLink,
+      whatsappNormalizado: cleanWpp,
       reset: resetItem
     });
   } catch (err) {

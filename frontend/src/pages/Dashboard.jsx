@@ -6,6 +6,42 @@ function formatBRLGlobal(val) {
   return num.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 }
 
+export function normalizeWhatsAppNumber(rawPhone) {
+  if (!rawPhone) return '';
+  let clean = String(rawPhone).replace(/\D/g, '');
+  if (!clean) return '';
+  clean = clean.replace(/^0+/, '');
+  if (clean.length === 10 || clean.length === 11) {
+    clean = '55' + clean;
+  }
+  return clean;
+}
+
+export function formatWhatsAppDisplay(rawPhone) {
+  const clean = normalizeWhatsAppNumber(rawPhone);
+  if (!clean) return rawPhone || '';
+  if (clean.length === 13 && clean.startsWith('55')) {
+    const ddd = clean.slice(2, 4);
+    const p1 = clean.slice(4, 9);
+    const p2 = clean.slice(9);
+    return `+55 (${ddd}) ${p1}-${p2}`;
+  }
+  if (clean.length === 12 && clean.startsWith('55')) {
+    const ddd = clean.slice(2, 4);
+    const p1 = clean.slice(4, 8);
+    const p2 = clean.slice(8);
+    return `+55 (${ddd}) ${p1}-${p2}`;
+  }
+  return `+${clean}`;
+}
+
+export function buildWhatsAppLink(rawPhone, messageText = '') {
+  const clean = normalizeWhatsAppNumber(rawPhone);
+  if (!clean) return '';
+  const query = messageText ? `?text=${encodeURIComponent(messageText)}` : '';
+  return `https://wa.me/${clean}${query}`;
+}
+
 function formatDate(dateStr) {
   if (!dateStr) return '';
   const parts = dateStr.split('-');
@@ -425,10 +461,14 @@ export default function Dashboard({ onLogout }) {
         tempPassword: custom ? custom.trim() : undefined
       });
       if (res.data?.success) {
+        const cleanPhone = normalizeWhatsAppNumber(item.whatsapp);
+        const resetMsg = `Olá, ${item.name || 'Usuário'}! 🔐\n\nSua senha do *Controle Financeiro* foi redefinida com sucesso!\n\n🔗 *Acesse o painel:* https://controle-financeiro-mauve-two.vercel.app/\n👤 *Seu E-mail:* ${item.email}\n🔑 *Sua Nova Senha Temporária:* ${res.data.tempPassword}\n\n⚠️ *Importante:* No seu acesso, altere para a sua nova senha pessoal na aba *Perfil*!`;
+        const waLink = buildWhatsAppLink(cleanPhone, resetMsg);
+
         setResetRecenteAprovado({
           name: item.name || item.email,
           tempPassword: res.data.tempPassword,
-          waLink: res.data.waLink
+          waLink: waLink || res.data.waLink
         });
         mostrarMensagem(`Senha de ${item.email} redefinida!`);
         carregarResetsSenha();
@@ -728,14 +768,19 @@ export default function Dashboard({ onLogout }) {
         tempPassword: customPass ? customPass.trim() : undefined
       });
       if (res.data?.success) {
+        const cleanWpp = normalizeWhatsAppNumber(reqItem.whatsapp);
+        const tempPassword = res.data.tempPassword;
+        const msgAprovado = `Olá, ${reqItem.name}! 🚀\n\nSeu acesso ao *Controle Financeiro* foi aprovado com sucesso!\n\n🔗 *Acesse o painel:* https://controle-financeiro-mauve-two.vercel.app/\n👤 *Seu E-mail de Login:* ${reqItem.email}\n🔑 *Sua Senha Temporária:* ${tempPassword}\n\n⚠️ *Importante:* No seu primeiro acesso, vá na aba *Perfil* e altere para a sua senha pessoal definitiva!`;
+        const credLink = buildWhatsAppLink(cleanWpp, msgAprovado);
+
         setSolicitacaoRecenteAprovada({
           nome: reqItem.name,
           email: reqItem.email,
           whatsapp: reqItem.whatsapp,
-          tempPassword: res.data.tempPassword,
-          waLink: res.data.waLink
+          tempPassword: tempPassword,
+          waLink: credLink
         });
-        mostrarMensagem(`Acesso aprovado para ${reqItem.name}! Senha: ${res.data.tempPassword}`);
+        mostrarMensagem(`Acesso aprovado para ${reqItem.name}! Senha: ${tempPassword}`);
         carregarSolicitacoes();
       }
     } catch (err) {
@@ -3053,12 +3098,12 @@ export default function Dashboard({ onLogout }) {
                   {!carregandoSolicitacoes && solicitacoes
                     .filter(s => filtroSolicitacao === 'todas' || s.status === filtroSolicitacao)
                     .map(item => {
-                      const cleanPhone = String(item.whatsapp || '').replace(/\D/g, '');
+                      const cleanPhone = normalizeWhatsAppNumber(item.whatsapp);
                       const isPending = item.status === 'pending';
                       const isApproved = item.status === 'approved';
-                      const waChatLink = `https://wa.me/${cleanPhone}`;
+                      const waChatLink = buildWhatsAppLink(cleanPhone);
                       const waSendCredentialsLink = isApproved
-                        ? `https://wa.me/${cleanPhone}?text=${encodeURIComponent(`Olá, ${item.name}! 🚀\n\nSeu acesso ao *Controle Financeiro* foi aprovado com sucesso!\n\n🔗 *Acesse o painel:* https://controle-financeiro-mauve-two.vercel.app/\n👤 *Seu E-mail de Login:* ${item.email}\n🔑 *Sua Senha Temporária:* ${item.tempPassword}\n\n⚠️ *Importante:* No seu primeiro acesso, vá na aba *Perfil* e altere para a sua senha pessoal definitiva!`)}`
+                        ? buildWhatsAppLink(cleanPhone, `Olá, ${item.name}! 🚀\n\nSeu acesso ao *Controle Financeiro* foi aprovado com sucesso!\n\n🔗 *Acesse o painel:* https://controle-financeiro-mauve-two.vercel.app/\n👤 *Seu E-mail de Login:* ${item.email}\n🔑 *Sua Senha Temporária:* ${item.tempPassword}\n\n⚠️ *Importante:* No seu primeiro acesso, vá na aba *Perfil* e altere para a sua senha pessoal definitiva!`)
                         : waChatLink;
 
                       return (
@@ -3093,7 +3138,7 @@ export default function Dashboard({ onLogout }) {
                             <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
                               📱 <strong>WhatsApp:</strong> 
                               <a href={waChatLink} target="_blank" rel="noreferrer" style={{ color: '#22c55e', textDecoration: 'underline' }}>
-                                {item.whatsapp}
+                                {formatWhatsAppDisplay(item.whatsapp)}
                               </a>
                             </div>
                             {item.salario > 0 && (
@@ -3278,7 +3323,11 @@ export default function Dashboard({ onLogout }) {
                       </div>
                       <div style={{ fontSize: '0.74rem', color: '#94a3b8', marginBottom: '0.5rem' }}>
                         <div>📧 <strong>E-mail:</strong> {rItem.email}</div>
-                        <div>📱 <strong>WhatsApp:</strong> {rItem.whatsapp || 'Não informado'}</div>
+                        <div>📱 <strong>WhatsApp:</strong> {rItem.whatsapp ? (
+                          <a href={buildWhatsAppLink(rItem.whatsapp)} target="_blank" rel="noreferrer" style={{ color: '#38bdf8', textDecoration: 'underline' }}>
+                            {formatWhatsAppDisplay(rItem.whatsapp)}
+                          </a>
+                        ) : 'Não informado'}</div>
                       </div>
 
                       <div style={{ display: 'grid', gridTemplateColumns: '1fr auto auto', gap: '0.4rem', alignItems: 'center' }}>

@@ -333,6 +333,17 @@ async function registerUser(email, name, password, rendaBase) {
 // ==========================================
 const LOCAL_REQUESTS_FILE = path.join(__dirname, '..', '..', 'data', 'access_requests.json');
 
+function normalizeWhatsAppNumber(rawPhone) {
+  if (!rawPhone) return '';
+  let clean = String(rawPhone).replace(/\D/g, '');
+  if (!clean) return '';
+  clean = clean.replace(/^0+/, '');
+  if (clean.length === 10 || clean.length === 11) {
+    clean = '55' + clean;
+  }
+  return clean;
+}
+
 function loadLocalRequests() {
   try {
     if (fs.existsSync(LOCAL_REQUESTS_FILE)) {
@@ -354,7 +365,7 @@ async function createAccessRequest({ name, email, whatsapp, rendaLiquida }) {
   const id = `req-${Date.now()}`;
   const cleanEmail = String(email || '').trim().toLowerCase();
   const cleanName = String(name || '').trim();
-  const cleanWpp = String(whatsapp || '').replace(/\D/g, '');
+  const cleanWpp = normalizeWhatsAppNumber(whatsapp);
   const salario = Number(rendaLiquida) || 0;
   const now = new Date().toISOString();
 
@@ -401,7 +412,7 @@ async function getAccessRequests() {
         id: row.id,
         name: row.name,
         email: row.email,
-        whatsapp: row.whatsapp,
+        whatsapp: normalizeWhatsAppNumber(row.whatsapp),
         salario: Number(row.salario || 0),
         status: row.status || 'pending',
         tempPassword: row.temp_password,
@@ -529,7 +540,7 @@ function saveLocalResets(resets) {
 async function createPasswordResetRequest({ email, whatsapp }) {
   const id = `reset-${Date.now()}`;
   const cleanEmail = String(email || '').trim().toLowerCase();
-  const cleanWpp = String(whatsapp || '').replace(/\D/g, '');
+  const cleanWpp = normalizeWhatsAppNumber(whatsapp);
   const now = new Date().toISOString();
 
   const user = await getUser(cleanEmail);
@@ -567,7 +578,7 @@ async function getPasswordResetRequests() {
       const dbList = res.items[0].resultSet.items.map(row => ({
         id: row.id,
         email: row.email,
-        whatsapp: row.whatsapp,
+        whatsapp: normalizeWhatsAppNumber(row.whatsapp),
         status: row.status || 'pending',
         tempPassword: row.temp_password,
         requestedAt: row.requested_at,
