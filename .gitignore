@@ -28,6 +28,9 @@ backend/data/
 !backend/src/data/
 uploads/
 backend/uploads/
+extrato/
+*.pdf
+*.ofx
 DOCUMENTAÇÃO/
 
 # Logs & temp files

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import api, { DEFAULT_FINANCE_STATE, calculateFinancialSummary } from '../services/api';
 
 function formatBRLGlobal(val) {
@@ -70,6 +70,18 @@ export default function Dashboard({ onLogout }) {
   const [novaFaturaObs, setNovaFaturaObs] = useState('Fatura variável (média R$ 300 ~ R$ 600). Ajuste conforme o fechamento.');
   const [editandoFaturaId, setEditandoFaturaId] = useState(null);
   const [valorEditadoFatura, setValorEditadoFatura] = useState('');
+
+  // Importação Inteligente de Extrato Bancário (Itaú / PDF / OFX / CSV)
+  const [mostrarModalImportacao, setMostrarModalImportacao] = useState(false);
+  const [extratoCarregando, setExtratoCarregando] = useState(false);
+  const [extratoNomeArquivo, setExtratoNomeArquivo] = useState('');
+  const [transacoesExtrato, setTransacoesExtrato] = useState([]);
+  const [filtroPeriodoExtrato, setFiltroPeriodoExtrato] = useState('30'); // '7' | '15' | '30' | 'todos' | 'personalizado'
+  const [filtroDataInicio, setFiltroDataInicio] = useState('');
+  const [filtroDataFim, setFiltroDataFim] = useState('');
+  const [filtroTipoExtrato, setFiltroTipoExtrato] = useState('saida'); // 'saida' | 'todas'
+  const [itensExtratoSelecionados, setItensExtratoSelecionados] = useState({});
+  const [importandoLote, setImportandoLote] = useState(false);
 
   // Formulário: Novo Gasto do Dia a Dia
   const [novaDescricao, setNovaDescricao] = useState('');
@@ -497,6 +509,172 @@ export default function Dashboard({ onLogout }) {
       console.warn('Erro ao carregar solicitações:', err);
     } finally {
       setCarregandoSolicitacoes(false);
+    }
+  };
+
+  // Processamento e Leitura de Arquivo de Extrato (Itaú / PDF / OFX / CSV)
+  const handleProcessarArquivoExtrato = async (file) => {
+    if (!file) return;
+    setExtratoCarregando(true);
+    setExtratoNomeArquivo(file.name);
+
+    try {
+      let payload = {};
+      const isPdf = file.name.toLowerCase().endsWith('.pdf');
+      
+      if (isPdf) {
+        const base64 = await new Promise((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => {
+            const result = reader.result;
+            const b64 = result.split(',')[1] || result;
+            resolve(b64);
+          };
+          reader.onerror = reject;
+          reader.readAsDataURL(file);
+        });
+        payload = { fileBase64: base64, fileName: file.name };
+      } else {
+        const text = await new Promise((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve(reader.result);
+          reader.onerror = reject;
+          reader.readAsText(file, 'utf-8');
+        });
+        payload = { fileText: text, fileName: file.name };
+      }
+
+      const res = await api.post('/api/finance/parse-statement', payload);
+      if (res.data?.success && Array.isArray(res.data.transactions)) {
+        const txs = res.data.transactions;
+        setTransacoesExtrato(txs);
+
+        // Marca por padrão todos os gastos (saídas)
+        const selecionadosIniciais = {};
+        txs.forEach(t => {
+          if (t.tipo === 'saida') {
+            selecionadosIniciais[t.id] = true;
+          }
+        });
+        setItensExtratoSelecionados(selecionadosIniciais);
+        mostrarMensagem(`✅ ${txs.length} lançamentos identificados no extrato!`);
+      } else {
+        mostrarMensagem('Nenhuma transação foi identificada no arquivo.');
+      }
+    } catch (err) {
+      console.error('Erro ao ler extrato:', err);
+      const erroMsg = err.response?.data?.erro || err.message;
+      mostrarMensagem(`Erro ao processar extrato: ${erroMsg}`);
+    } finally {
+      setExtratoCarregando(false);
+    }
+  };
+
+  // Filtragem Dinâmica por Período e Tipo
+  const transacoesFiltradasExtrato = useMemo(() => {
+    if (!transacoesExtrato.length) return [];
+
+    // Localiza data mais recente presente no extrato (ou hoje)
+    const datasMs = transacoesExtrato.map(t => new Date(t.data).getTime()).filter(d => !isNaN(d));
+    const dataRef = datasMs.length ? new Date(Math.max(...datasMs)) : new Date();
+
+    return transacoesExtrato.filter(t => {
+      // 1. Filtro Tipo
+      if (filtroTipoExtrato === 'saida' && t.tipo !== 'saida') return false;
+
+      // 2. Filtro Período
+      if (filtroPeriodoExtrato === 'todos') return true;
+
+      const tDate = new Date(t.data);
+      if (isNaN(tDate.getTime())) return true;
+
+      const diffDays = Math.round((dataRef - tDate) / (1000 * 60 * 60 * 24));
+
+      if (filtroPeriodoExtrato === '7') {
+        return diffDays >= 0 && diffDays <= 7;
+      }
+      if (filtroPeriodoExtrato === '15') {
+        return diffDays >= 0 && diffDays <= 15;
+      }
+      if (filtroPeriodoExtrato === '30') {
+        return diffDays >= 0 && diffDays <= 30;
+      }
+      if (filtroPeriodoExtrato === 'personalizado') {
+        if (filtroDataInicio && t.data < filtroDataInicio) return false;
+        if (filtroDataFim && t.data > filtroDataFim) return false;
+        return true;
+      }
+      return true;
+    });
+  }, [transacoesExtrato, filtroPeriodoExtrato, filtroTipoExtrato, filtroDataInicio, filtroDataFim]);
+
+  const toggleSelecionarTodosExtrato = () => {
+    const todosMarcados = transacoesFiltradasExtrato.length > 0 && transacoesFiltradasExtrato.every(t => itensExtratoSelecionados[t.id]);
+    const novo = { ...itensExtratoSelecionados };
+    transacoesFiltradasExtrato.forEach(t => {
+      novo[t.id] = !todosMarcados;
+    });
+    setItensExtratoSelecionados(novo);
+  };
+
+  const toggleItemExtrato = (id) => {
+    setItensExtratoSelecionados(prev => ({
+      ...prev,
+      [id]: !prev[id]
+    }));
+  };
+
+  const handleAlterarCategoriaExtrato = (id, novaCat) => {
+    setTransacoesExtrato(prev => prev.map(t => t.id === id ? { ...t, categoria: novaCat } : t));
+  };
+
+  const handleConfirmarImportacaoExtrato = async () => {
+    const selecionados = transacoesFiltradasExtrato.filter(t => itensExtratoSelecionados[t.id]);
+    if (selecionados.length === 0) {
+      mostrarMensagem('Selecione ao menos um gasto para cadastrar.');
+      return;
+    }
+
+    setImportandoLote(true);
+    try {
+      const res = await api.post('/api/finance/batch-transactions', {
+        transacoes: selecionados.map(s => ({
+          descricao: s.descricao,
+          valor: s.valor,
+          categoria: s.categoria,
+          data: s.data
+        }))
+      });
+
+      if (res.data?.success) {
+        setData(res.data);
+        localStorage.setItem('finance_cached_data', JSON.stringify(res.data));
+        mostrarMensagem(`🎉 ${selecionados.length} gastos do extrato cadastrados com sucesso!`);
+        setMostrarModalImportacao(false);
+        setTransacoesExtrato([]);
+        setItensExtratoSelecionados({});
+      }
+    } catch (err) {
+      // Fallback local se estiver offline
+      const novosGastos = selecionados.map((s, idx) => ({
+        id: `tx-imp-${Date.now()}-${idx}`,
+        descricao: s.descricao,
+        valor: s.valor,
+        categoria: s.categoria,
+        data: s.data
+      }));
+      const novoData = {
+        ...data,
+        despesasVariaveis: [...novosGastos, ...(data.despesasVariaveis || [])]
+      };
+      setData(novoData);
+      localStorage.setItem('finance_cached_data', JSON.stringify(novoData));
+      mostrarMensagem(`🎉 ${selecionados.length} gastos salvos localmente!`);
+      setMostrarModalImportacao(false);
+      setTransacoesExtrato([]);
+      setItensExtratoSelecionados({});
+    } finally {
+      setImportandoLote(false);
     }
   };
 
@@ -2174,7 +2352,7 @@ export default function Dashboard({ onLogout }) {
         {activeTab === 'gastos' && (
           <>
             <section className="card">
-              <div className="card-header">
+              <div className="card-header" style={{ flexWrap: 'wrap', gap: '0.6rem' }}>
                 <div>
                   <div className="card-title">
                     <span>🛒</span> Lançar Novo Gasto
@@ -2183,9 +2361,27 @@ export default function Dashboard({ onLogout }) {
                     Alimentação, transporte, lazer e dia a dia
                   </div>
                 </div>
-                <span className="badge-tag" style={{ color: '#f59e0b', borderColor: 'rgba(245,158,11,0.3)' }}>
-                  Total: {formatBRL(summary.totalVariavel)}
-                </span>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
+                  <button
+                    type="button"
+                    onClick={() => setMostrarModalImportacao(true)}
+                    className="btn-primary"
+                    style={{
+                      fontSize: '0.76rem',
+                      padding: '0.45rem 0.8rem',
+                      background: 'linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%)',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '0.4rem',
+                      whiteSpace: 'nowrap'
+                    }}
+                  >
+                    <span>📥</span> Importar Extrato (Itaú / PDF / OFX)
+                  </button>
+                  <span className="badge-tag" style={{ color: '#f59e0b', borderColor: 'rgba(245,158,11,0.3)' }}>
+                    Total: {formatBRL(summary.totalVariavel)}
+                  </span>
+                </div>
               </div>
 
               <form onSubmit={handleAdicionarGasto} className="quick-add-box">
@@ -3790,6 +3986,352 @@ export default function Dashboard({ onLogout }) {
             >
               Entendi, fechar
             </button>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL: IMPORTAÇÃO INTELIGENTE DE EXTRATO BANCÁRIO */}
+      {mostrarModalImportacao && (
+        <div
+          style={{
+            position: 'fixed',
+            inset: 0,
+            background: 'rgba(0, 0, 0, 0.8)',
+            backdropFilter: 'blur(8px)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 9999,
+            padding: '1rem'
+          }}
+          onClick={() => setMostrarModalImportacao(false)}
+        >
+          <div
+            style={{
+              background: '#0f172a',
+              border: '1px solid rgba(59, 130, 246, 0.4)',
+              borderRadius: '20px',
+              maxWidth: '620px',
+              width: '100%',
+              padding: '1.5rem',
+              boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.6)',
+              maxHeight: '92vh',
+              overflowY: 'auto'
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Header */}
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
+                <div style={{
+                  width: '38px',
+                  height: '38px',
+                  borderRadius: '10px',
+                  background: 'rgba(59, 130, 246, 0.15)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  fontSize: '1.3rem'
+                }}>
+                  📥
+                </div>
+                <div>
+                  <h3 style={{ fontSize: '1.1rem', fontWeight: 700, color: '#fff', margin: 0 }}>
+                    Importar Extrato Bancário
+                  </h3>
+                  <p style={{ fontSize: '0.75rem', color: '#94a3b8', margin: 0 }}>
+                    Itaú, Nubank, Bradesco, Inter (PDF, OFX, CSV ou TXT)
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => setMostrarModalImportacao(false)}
+                className="btn-del"
+                style={{ fontSize: '1rem', width: '32px', height: '32px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+              >
+                ✕
+              </button>
+            </div>
+
+            {/* Dropzone / Upload Box */}
+            <div
+              style={{
+                border: '2px dashed rgba(59, 130, 246, 0.4)',
+                borderRadius: '14px',
+                padding: '1.5rem 1rem',
+                textAlign: 'center',
+                background: 'rgba(59, 130, 246, 0.04)',
+                cursor: 'pointer',
+                marginBottom: '1.25rem'
+              }}
+              onClick={() => document.getElementById('input-file-extrato').click()}
+            >
+              <input
+                id="input-file-extrato"
+                type="file"
+                accept=".pdf,.ofx,.csv,.txt"
+                style={{ display: 'none' }}
+                onChange={(e) => {
+                  if (e.target.files && e.target.files[0]) {
+                    handleProcessarArquivoExtrato(e.target.files[0]);
+                  }
+                }}
+              />
+              <div style={{ fontSize: '2rem', marginBottom: '0.4rem' }}>
+                {extratoCarregando ? '⏳' : '📄'}
+              </div>
+              <strong style={{ display: 'block', color: '#e2e8f0', fontSize: '0.9rem', marginBottom: '0.25rem' }}>
+                {extratoCarregando ? 'Lendo e categorizando lançamentos...' : (extratoNomeArquivo ? `Arquivo selecionado: ${extratoNomeArquivo}` : 'Toque para selecionar o extrato do seu banco')}
+              </strong>
+              <span style={{ fontSize: '0.74rem', color: '#94a3b8' }}>
+                Suporta o PDF do Extrato Itaú, arquivos bancários OFX ou planilhas CSV
+              </span>
+            </div>
+
+            {/* Configurações de Filtro de Período e Tipo se houver transações lidas */}
+            {transacoesExtrato.length > 0 && (
+              <>
+                <div style={{
+                  background: 'rgba(255, 255, 255, 0.03)',
+                  border: '1px solid rgba(255, 255, 255, 0.08)',
+                  borderRadius: '12px',
+                  padding: '0.85rem',
+                  marginBottom: '1rem'
+                }}>
+                  {/* Filtro de Período */}
+                  <div style={{ marginBottom: '0.65rem' }}>
+                    <label style={{ fontSize: '0.74rem', color: '#94a3b8', display: 'block', marginBottom: '0.35rem', fontWeight: 600 }}>
+                      ⏱️ Período de Lançamentos a Importar:
+                    </label>
+                    <div style={{ display: 'flex', gap: '0.35rem', flexWrap: 'wrap' }}>
+                      {[
+                        { id: '30', label: 'Últimos 30 dias' },
+                        { id: '15', label: 'Últimos 15 dias' },
+                        { id: '7', label: 'Últimos 7 dias' },
+                        { id: 'todos', label: 'Todos do Arquivo' },
+                        { id: 'personalizado', label: 'Personalizado' }
+                      ].map(tab => (
+                        <button
+                          key={tab.id}
+                          type="button"
+                          onClick={() => setFiltroPeriodoExtrato(tab.id)}
+                          style={{
+                            padding: '0.3rem 0.6rem',
+                            fontSize: '0.72rem',
+                            borderRadius: '6px',
+                            border: 'none',
+                            fontWeight: 600,
+                            cursor: 'pointer',
+                            background: filtroPeriodoExtrato === tab.id ? '#3b82f6' : 'rgba(255, 255, 255, 0.06)',
+                            color: filtroPeriodoExtrato === tab.id ? '#fff' : '#94a3b8'
+                          }}
+                        >
+                          {tab.label}
+                        </button>
+                      ))}
+                    </div>
+
+                    {/* Datas personalizadas se selecionado */}
+                    {filtroPeriodoExtrato === 'personalizado' && (
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem', marginTop: '0.5rem' }}>
+                        <div>
+                          <label style={{ fontSize: '0.68rem', color: '#64748b' }}>De:</label>
+                          <input
+                            type="date"
+                            className="input-field"
+                            style={{ padding: '0.35rem', fontSize: '0.72rem' }}
+                            value={filtroDataInicio}
+                            onChange={(e) => setFiltroDataInicio(e.target.value)}
+                          />
+                        </div>
+                        <div>
+                          <label style={{ fontSize: '0.68rem', color: '#64748b' }}>Até:</label>
+                          <input
+                            type="date"
+                            className="input-field"
+                            style={{ padding: '0.35rem', fontSize: '0.72rem' }}
+                            value={filtroDataFim}
+                            onChange={(e) => setFiltroDataFim(e.target.value)}
+                          />
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Filtro de Tipo (Saída vs Todas) */}
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '0.4rem', borderTop: '1px solid rgba(255,255,255,0.06)', paddingTop: '0.65rem' }}>
+                    <div style={{ display: 'flex', gap: '0.35rem' }}>
+                      <button
+                        type="button"
+                        onClick={() => setFiltroTipoExtrato('saida')}
+                        style={{
+                          padding: '0.25rem 0.55rem',
+                          fontSize: '0.7rem',
+                          borderRadius: '6px',
+                          border: 'none',
+                          cursor: 'pointer',
+                          background: filtroTipoExtrato === 'saida' ? 'rgba(244, 63, 94, 0.2)' : 'transparent',
+                          color: filtroTipoExtrato === 'saida' ? '#f43f5e' : '#94a3b8',
+                          fontWeight: filtroTipoExtrato === 'saida' ? 700 : 500
+                        }}
+                      >
+                        Apenas Despesas (Saídas)
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setFiltroTipoExtrato('todas')}
+                        style={{
+                          padding: '0.25rem 0.55rem',
+                          fontSize: '0.7rem',
+                          borderRadius: '6px',
+                          border: 'none',
+                          cursor: 'pointer',
+                          background: filtroTipoExtrato === 'todas' ? 'rgba(59, 130, 246, 0.2)' : 'transparent',
+                          color: filtroTipoExtrato === 'todas' ? '#60a5fa' : '#94a3b8',
+                          fontWeight: filtroTipoExtrato === 'todas' ? 700 : 500
+                        }}
+                      >
+                        Todas (Saídas e Entradas)
+                      </button>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={toggleSelecionarTodosExtrato}
+                      style={{
+                        background: 'none',
+                        border: 'none',
+                        color: '#38bdf8',
+                        fontSize: '0.72rem',
+                        cursor: 'pointer',
+                        textDecoration: 'underline'
+                      }}
+                    >
+                      {transacoesFiltradasExtrato.every(t => itensExtratoSelecionados[t.id]) ? 'Desmarcar Todos' : 'Marcar Todos'}
+                    </button>
+                  </div>
+                </div>
+
+                {/* Lista de Transações Lidas com Categorias Inteligentes */}
+                <div style={{ marginBottom: '1rem' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.45rem', fontSize: '0.75rem', color: '#94a3b8' }}>
+                    <span>
+                      Mostrando <strong>{transacoesFiltradasExtrato.length}</strong> lançamentos no período
+                    </span>
+                    <span>
+                      Selecionados: <strong style={{ color: '#10b981' }}>
+                        {transacoesFiltradasExtrato.filter(t => itensExtratoSelecionados[t.id]).length}
+                      </strong> (Total: {formatBRL(transacoesFiltradasExtrato.filter(t => itensExtratoSelecionados[t.id]).reduce((acc, t) => acc + t.valor, 0))})
+                    </span>
+                  </div>
+
+                  <div style={{
+                    maxHeight: '280px',
+                    overflowY: 'auto',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: '0.4rem',
+                    background: 'rgba(0,0,0,0.2)',
+                    borderRadius: '10px',
+                    padding: '0.4rem'
+                  }}>
+                    {transacoesFiltradasExtrato.map(t => {
+                      const isChecked = Boolean(itensExtratoSelecionados[t.id]);
+                      return (
+                        <div
+                          key={t.id}
+                          style={{
+                            display: 'grid',
+                            gridTemplateColumns: 'auto 65px 1fr 125px auto',
+                            alignItems: 'center',
+                            gap: '0.5rem',
+                            padding: '0.45rem 0.6rem',
+                            borderRadius: '8px',
+                            background: isChecked ? 'rgba(59, 130, 246, 0.08)' : 'rgba(255,255,255,0.02)',
+                            border: `1px solid ${isChecked ? 'rgba(59, 130, 246, 0.3)' : 'rgba(255,255,255,0.04)'}`,
+                            fontSize: '0.75rem'
+                          }}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={isChecked}
+                            onChange={() => toggleItemExtrato(t.id)}
+                            style={{ cursor: 'pointer', width: '15px', height: '15px' }}
+                          />
+
+                          <span style={{ color: '#94a3b8', fontSize: '0.7rem' }}>
+                            {t.dataFormatada || t.data}
+                          </span>
+
+                          <span style={{
+                            color: '#e2e8f0',
+                            fontWeight: 500,
+                            overflow: 'hidden',
+                            textOverflow: 'ellipsis',
+                            whiteSpace: 'nowrap'
+                          }} title={t.descricao}>
+                            {t.descricao}
+                          </span>
+
+                          <select
+                            className="select-field"
+                            style={{ padding: '0.2rem 0.4rem', fontSize: '0.7rem', height: '26px' }}
+                            value={t.categoria}
+                            onChange={(e) => handleAlterarCategoriaExtrato(t.id, e.target.value)}
+                          >
+                            <option value="Alimentação">🍽️ Alimentação</option>
+                            <option value="Supermercado">🛒 Supermercado</option>
+                            <option value="Transporte">🚗 Transporte</option>
+                            <option value="Saúde">💊 Saúde</option>
+                            <option value="Lazer">🎉 Lazer</option>
+                            <option value="Esporte">🥋 Esporte</option>
+                            <option value="Assinaturas">📺 Assinaturas</option>
+                            <option value="Essencial">🏠 Essencial</option>
+                            <option value="Outros">📦 Outros</option>
+                          </select>
+
+                          <strong style={{
+                            color: t.tipo === 'saida' ? '#f43f5e' : '#10b981',
+                            whiteSpace: 'nowrap',
+                            textAlign: 'right'
+                          }}>
+                            {t.tipo === 'saida' ? '-' : '+'}{formatBRL(t.valor)}
+                          </strong>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* Footer Buttons */}
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 2fr', gap: '0.6rem' }}>
+                  <button
+                    type="button"
+                    onClick={() => setMostrarModalImportacao(false)}
+                    className="btn-secondary"
+                    style={{ textAlign: 'center' }}
+                  >
+                    Cancelar
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={handleConfirmarImportacaoExtrato}
+                    disabled={importandoLote || transacoesFiltradasExtrato.filter(t => itensExtratoSelecionados[t.id]).length === 0}
+                    className="btn-primary"
+                    style={{
+                      background: 'linear-gradient(135deg, #10b981 0%, #059669 100%)',
+                      justifyContent: 'center',
+                      textAlign: 'center'
+                    }}
+                  >
+                    {importandoLote
+                      ? 'Salvando no Oracle ATP...'
+                      : `💾 Cadastrar ${transacoesFiltradasExtrato.filter(t => itensExtratoSelecionados[t.id]).length} Gastos Selecionados`}
+                  </button>
+                </div>
+              </>
+            )}
           </div>
         </div>
       )}

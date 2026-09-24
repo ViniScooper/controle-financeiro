@@ -2,6 +2,9 @@ const express = require('express');
 const router = express.Router();
 const jwt = require('jsonwebtoken');
 const https = require('https');
+const multer = require('multer');
+const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 15 * 1024 * 1024 } });
+const { parseBankStatement } = require('../services/statementParser');
 const oracleAtp = require('../data/oracleAtpService');
 
 const JWT_SECRET = process.env.JWT_SECRET || 'fincontrol_jwt_secret_key_default';
@@ -528,6 +531,80 @@ router.post('/transactions', async (req, res) => {
       success: true,
       mensagem: 'Despesa registrada com sucesso!',
       transacao: novoGasto,
+      summary,
+      ...data
+    });
+  } catch (err) {
+    return res.status(500).json({ success: false, erro: err.message });
+  }
+});
+
+// POST /api/finance/parse-statement (Upload e leitura de extratos Itaú, OFX, PDF, CSV)
+router.post('/parse-statement', upload.single('file'), async (req, res) => {
+  try {
+    let buffer = null;
+    let filename = '';
+
+    if (req.file) {
+      buffer = req.file.buffer;
+      filename = req.file.originalname || '';
+    } else if (req.body?.fileBase64) {
+      buffer = Buffer.from(req.body.fileBase64, 'base64');
+      filename = req.body.fileName || 'extrato.pdf';
+    } else if (req.body?.fileText) {
+      buffer = Buffer.from(req.body.fileText, 'utf8');
+      filename = req.body.fileName || 'extrato.csv';
+    } else {
+      return res.status(400).json({ success: false, erro: 'Nenhum arquivo de extrato enviado.' });
+    }
+
+    const transactions = await parseBankStatement(buffer, filename);
+    return res.json({
+      success: true,
+      filename,
+      total: transactions.length,
+      transactions
+    });
+  } catch (err) {
+    console.error('Erro ao processar extrato:', err);
+    return res.status(500).json({ success: false, erro: 'Falha ao processar extrato: ' + err.message });
+  }
+});
+
+// POST /api/finance/batch-transactions (Cadastrar múltiplos gastos selecionados)
+router.post('/batch-transactions', async (req, res) => {
+  try {
+    const userEmail = getUserEmail(req);
+    if (!userEmail) return res.status(401).json({ success: false, erro: 'Usuário não autenticado.' });
+    const userRecord = await oracleAtp.getUser(userEmail);
+    if (!userRecord) return res.status(404).json({ success: false, erro: 'Usuário não encontrado.' });
+
+    const data = userRecord.data;
+    const { transacoes } = req.body;
+    if (!Array.isArray(transacoes) || transacoes.length === 0) {
+      return res.status(400).json({ success: false, erro: 'Nenhuma transação selecionada.' });
+    }
+
+    if (!data.despesasVariaveis) data.despesasVariaveis = [];
+
+    const novosGastos = transacoes.map((t, idx) => ({
+      id: `tx-imp-${Date.now()}-${idx}`,
+      descricao: String(t.descricao || 'Despesa Extrato').trim(),
+      valor: Math.abs(Number(t.valor || 0)),
+      categoria: t.categoria || 'Outros',
+      data: t.data || new Date().toISOString().split('T')[0]
+    }));
+
+    // Adiciona ao topo das despesas
+    data.despesasVariaveis = [...novosGastos, ...data.despesasVariaveis];
+
+    await oracleAtp.saveUser(userEmail, userRecord.name, userRecord.password, data);
+    const summary = computeSummary(data);
+
+    return res.status(201).json({
+      success: true,
+      mensagem: `${novosGastos.length} despesas importadas com sucesso!`,
+      adicionados: novosGastos.length,
       summary,
       ...data
     });
