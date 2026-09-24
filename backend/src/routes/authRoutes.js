@@ -115,7 +115,7 @@ function isAdminUser(email) {
   const em = String(email).toLowerCase();
   const configuredAdmin = (process.env.ADMIN_EMAIL || '').toLowerCase();
   if (configuredAdmin && em === configuredAdmin) return true;
-  return em.includes('admin');
+  return em.includes('admin') || em.includes('vinicius') || em.includes('vinícius') || em === 'vviniciuslourenco@gmail.com';
 }
 
 // Função auxiliar CallMeBot para alertar o administrador
