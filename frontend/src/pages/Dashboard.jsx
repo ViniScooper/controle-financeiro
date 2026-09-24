@@ -1290,26 +1290,6 @@ export default function Dashboard({ onLogout }) {
           >
             {pushPermissao === 'granted' ? '🔔' : '🔕'}
           </button>
-          {/* Botão Atalho Direto CloudOps Hub */}
-          <a
-            href="https://cloudops-hub-dun.vercel.app/"
-            target="_blank"
-            rel="noreferrer"
-            className="btn-icon"
-            title="Abrir CloudOps Hub (Gestão & Aprovação de Usuários, VM e Docker)"
-            style={{
-              color: '#20d6c7',
-              borderColor: 'rgba(32, 214, 199, 0.4)',
-              background: 'rgba(32, 214, 199, 0.12)',
-              textDecoration: 'none',
-              display: 'inline-flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              fontSize: '0.95rem'
-            }}
-          >
-            ☁️
-          </a>
           <button onClick={carregarDados} className="btn-icon" title="Sincronizar Oracle ATP">🔄</button>
           <button onClick={onLogout} className="btn-icon" title="Sair">🚪</button>
         </div>
@@ -3759,44 +3739,6 @@ export default function Dashboard({ onLogout }) {
               <p style={{ fontSize: '0.78rem', color: '#94a3b8', lineHeight: 1.5 }}>
                 Gera um arquivo <code>.csv</code> com resumo do mês, gastos diários categorizados, despesas fixas, faturas de cartão e status das parcelas de dívidas.
               </p>
-            </section>
-
-            {/* ATALHO MASTER: CLOUDOPS HUB */}
-            <section className="card" style={{ border: '1px solid rgba(32, 214, 199, 0.35)', background: 'linear-gradient(135deg, rgba(32, 214, 199, 0.08) 0%, rgba(15, 23, 42, 0.6) 100%)' }}>
-              <div className="card-header" style={{ alignItems: 'flex-start' }}>
-                <div>
-                  <div className="card-title" style={{ color: '#20d6c7', display: 'flex', alignItems: 'center', gap: '0.45rem' }}>
-                    <span>☁️</span> CloudOps Hub — Painel Master
-                  </div>
-                  <div className="card-subtitle">
-                    Aprovação de novos usuários, métricas da VM Oracle, Docker & Deploys
-                  </div>
-                </div>
-                <span className="badge-tag" style={{ color: '#20d6c7', borderColor: 'rgba(32, 214, 199, 0.4)' }}>
-                  MASTER ONLY
-                </span>
-              </div>
-              <p style={{ fontSize: '0.78rem', color: '#94a3b8', lineHeight: 1.5, marginBottom: '0.85rem' }}>
-                Acesse o seu centro de operações em nuvem para aprovar novos cadastros de usuários do FinControl, emitir senhas temporárias e acompanhar os containers da VM.
-              </p>
-              <a
-                href="https://cloudops-hub-dun.vercel.app/"
-                target="_blank"
-                rel="noreferrer"
-                className="btn-primary"
-                style={{
-                  background: 'linear-gradient(135deg, #0d9488 0%, #10b981 100%)',
-                  textDecoration: 'none',
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  gap: '0.4rem',
-                  fontSize: '0.8rem',
-                  padding: '0.5rem 1rem',
-                  fontWeight: 600
-                }}
-              >
-                <span>🚀</span> Acessar CloudOps Hub ↗
-              </a>
             </section>
 
             <section className="card">
