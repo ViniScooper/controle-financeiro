@@ -9,25 +9,23 @@ const ENV_API_URL = import.meta.env.VITE_API_URL;
 const ORACLE_TUNNEL_URL = 'https://lodge-risks-concrete-loved.trycloudflare.com';
 
 function resolveBaseUrl() {
-  if (ENV_API_URL) return ENV_API_URL;
-
   if (typeof window !== 'undefined') {
     const host = window.location.hostname;
+    // Se estiver na Vercel ou qualquer domínio público
+    if (host.includes('vercel.app')) {
+      return ORACLE_TUNNEL_URL;
+    }
     // Se estiver rodando localmente
     if (host === 'localhost' || host === '127.0.0.1') {
-      return 'http://localhost:3001';
+      return ENV_API_URL || 'http://localhost:3001';
     }
     // Se estiver rodando na mesma rede Wi-Fi do celular
     if (host.startsWith('192.168.') || host.startsWith('10.0.')) {
       return `http://${host}:3001`;
     }
-    // Se estiver na Vercel
-    if (host.includes('vercel.app')) {
-      return ORACLE_TUNNEL_URL;
-    }
   }
 
-  return 'http://localhost:3001';
+  return ENV_API_URL || ORACLE_TUNNEL_URL;
 }
 
 export const BASE_API_URL = resolveBaseUrl().replace(/\/+$/, '');
