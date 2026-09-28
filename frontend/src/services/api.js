@@ -36,6 +36,14 @@ export const DEFAULT_FINANCE_STATE = {
   gastosFixos: [],
   despesasVariaveis: [],
   faturasCartoes: [],
+  tetosGastos: [
+    { id: "teto-1", categoria: "Alimentação", valorTeto: 600.00, cor: "#10b981" },
+    { id: "teto-2", categoria: "Saúde", valorTeto: 500.00, cor: "#3b82f6" },
+    { id: "teto-3", categoria: "Supermercado", valorTeto: 700.00, cor: "#8b5cf6" },
+    { id: "teto-4", categoria: "Esporte", valorTeto: 350.00, cor: "#ec4899" },
+    { id: "teto-5", categoria: "Lazer", valorTeto: 300.00, cor: "#f59e0b" },
+    { id: "teto-6", categoria: "Essencial", valorTeto: 200.00, cor: "#64748b" }
+  ],
   metas: [],
   planejamentoExtra: []
 };

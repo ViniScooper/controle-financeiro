@@ -1031,6 +1031,132 @@ router.delete('/transactions/:id', async (req, res) => {
   }
 });
 
+// ============================================================
+// ROTAS DE TETOS DE GASTOS / ORÇAMENTO POR CATEGORIA
+// ============================================================
+
+// GET /api/finance/budget-limits
+router.get('/budget-limits', async (req, res) => {
+  try {
+    const userEmail = getUserEmail(req);
+    const userRecord = await oracleAtp.getUser(userEmail);
+    if (!userRecord) return res.status(404).json({ success: false, erro: 'Usuário não encontrado.' });
+    return res.json({ success: true, tetosGastos: userRecord.data.tetosGastos || [] });
+  } catch (err) {
+    return res.status(500).json({ success: false, erro: err.message });
+  }
+});
+
+// PUT /api/finance/budget-limits (Atualizar lista completa de tetos)
+router.put('/budget-limits', async (req, res) => {
+  try {
+    const userEmail = getUserEmail(req);
+    const userRecord = await oracleAtp.getUser(userEmail);
+    if (!userRecord) return res.status(404).json({ success: false, erro: 'Usuário não encontrado.' });
+
+    const { tetos } = req.body;
+    if (!Array.isArray(tetos)) {
+      return res.status(400).json({ success: false, erro: 'Lista de tetos inválida.' });
+    }
+
+    const data = userRecord.data;
+    data.tetosGastos = tetos.map(t => ({
+      id: t.id || `teto-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+      categoria: String(t.categoria || 'Geral').trim(),
+      valorTeto: Math.max(0, parseFloat(t.valorTeto || 0)),
+      cor: t.cor || '#10b981'
+    }));
+
+    await oracleAtp.saveUser(userEmail, userRecord.name, userRecord.password, data);
+    const summary = computeSummary(data);
+
+    return res.json({
+      success: true,
+      mensagem: 'Tetos de gastos atualizados com sucesso!',
+      tetosGastos: data.tetosGastos,
+      summary,
+      ...data
+    });
+  } catch (err) {
+    return res.status(500).json({ success: false, erro: err.message });
+  }
+});
+
+// POST /api/finance/budget-limits (Criar ou atualizar teto individual)
+router.post('/budget-limits', async (req, res) => {
+  try {
+    const userEmail = getUserEmail(req);
+    const userRecord = await oracleAtp.getUser(userEmail);
+    if (!userRecord) return res.status(404).json({ success: false, erro: 'Usuário não encontrado.' });
+
+    const { id, categoria, valorTeto, cor } = req.body;
+    if (!categoria || valorTeto === undefined) {
+      return res.status(400).json({ success: false, erro: 'Categoria e valor do teto são obrigatórios.' });
+    }
+
+    const data = userRecord.data;
+    if (!Array.isArray(data.tetosGastos)) data.tetosGastos = [];
+
+    const existingIdx = data.tetosGastos.findIndex(t => 
+      (id && String(t.id) === String(id)) || 
+      t.categoria.toLowerCase() === categoria.trim().toLowerCase()
+    );
+
+    const novoTeto = {
+      id: id || (existingIdx >= 0 ? data.tetosGastos[existingIdx].id : `teto-${Date.now()}`),
+      categoria: categoria.trim(),
+      valorTeto: Math.max(0, parseFloat(valorTeto || 0)),
+      cor: cor || (existingIdx >= 0 ? data.tetosGastos[existingIdx].cor : '#10b981')
+    };
+
+    if (existingIdx >= 0) {
+      data.tetosGastos[existingIdx] = novoTeto;
+    } else {
+      data.tetosGastos.push(novoTeto);
+    }
+
+    await oracleAtp.saveUser(userEmail, userRecord.name, userRecord.password, data);
+    const summary = computeSummary(data);
+
+    return res.json({
+      success: true,
+      mensagem: `Teto para "${categoria}" salvo com sucesso!`,
+      tetosGastos: data.tetosGastos,
+      summary,
+      ...data
+    });
+  } catch (err) {
+    return res.status(500).json({ success: false, erro: err.message });
+  }
+});
+
+// DELETE /api/finance/budget-limits/:id (Remover teto)
+router.delete('/budget-limits/:id', async (req, res) => {
+  try {
+    const userEmail = getUserEmail(req);
+    const userRecord = await oracleAtp.getUser(userEmail);
+    if (!userRecord) return res.status(404).json({ success: false, erro: 'Usuário não encontrado.' });
+
+    const { id } = req.params;
+    const data = userRecord.data;
+    if (!Array.isArray(data.tetosGastos)) data.tetosGastos = [];
+
+    data.tetosGastos = data.tetosGastos.filter(t => String(t.id) !== String(id));
+    await oracleAtp.saveUser(userEmail, userRecord.name, userRecord.password, data);
+    const summary = computeSummary(data);
+
+    return res.json({
+      success: true,
+      mensagem: 'Teto de gastos removido!',
+      tetosGastos: data.tetosGastos,
+      summary,
+      ...data
+    });
+  } catch (err) {
+    return res.status(500).json({ success: false, erro: err.message });
+  }
+});
+
 // POST /api/finance/goals
 router.post('/goals', async (req, res) => {
   try {

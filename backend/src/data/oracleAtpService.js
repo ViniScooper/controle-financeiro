@@ -92,6 +92,14 @@ const ADMIN_INITIAL_DATA = {
       observacao: "Fatura variável (geralmente entre R$ 300 e R$ 600). Vence dia 19/10/2026."
     }
   ],
+  tetosGastos: [
+    { id: "teto-1", categoria: "Alimentação", valorTeto: 600.00, cor: "#10b981" },
+    { id: "teto-2", categoria: "Saúde", valorTeto: 500.00, cor: "#3b82f6" },
+    { id: "teto-3", categoria: "Supermercado", valorTeto: 700.00, cor: "#8b5cf6" },
+    { id: "teto-4", categoria: "Esporte", valorTeto: 350.00, cor: "#ec4899" },
+    { id: "teto-5", categoria: "Lazer", valorTeto: 300.00, cor: "#f59e0b" },
+    { id: "teto-6", categoria: "Essencial", valorTeto: 200.00, cor: "#64748b" }
+  ],
   metas: [
     { id: "meta-1", titulo: "Quitação Total Acordo Itaú", categoria: "Dívida", valorAlvo: 11612.58, valorAtual: 1935.43, dataAlvo: "2026-12-31", icone: "💳", descricao: "Eliminar 100% dos juros do cartão antecipando parcelas com o 13º salário." },
     { id: "meta-2", titulo: "Reserva de Emergência", categoria: "Segurança", valorAlvo: 5000.00, valorAtual: 200.00, dataAlvo: "2027-03-31", icone: "🛡️", descricao: "Meta inicial para imprevistos de saúde e manutenção, reforçada pelo saque FGTS em março." },
@@ -217,6 +225,11 @@ async function getUser(email) {
       // Garante faturasCartoes
       if (!dataObj.faturasCartoes) {
         dataObj.faturasCartoes = [];
+      }
+
+      // Garante tetosGastos
+      if (!Array.isArray(dataObj.tetosGastos) || dataObj.tetosGastos.length === 0) {
+        dataObj.tetosGastos = ADMIN_INITIAL_DATA.tetosGastos;
       }
 
       // Garante dividas

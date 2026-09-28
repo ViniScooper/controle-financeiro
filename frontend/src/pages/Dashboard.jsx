@@ -1,5 +1,8 @@
 import React, { useState, useEffect, useMemo } from 'react';
+import { Smartphone, FileSpreadsheet, Bell, BellOff, RefreshCw, LogOut, Calendar } from 'lucide-react';
 import api, { DEFAULT_FINANCE_STATE, calculateFinancialSummary } from '../services/api';
+import BudgetLimitsSection from '../components/dashboard/BudgetLimitsSection';
+import BottomNav from '../components/dashboard/BottomNav';
 
 function formatBRLGlobal(val) {
   const num = Number(val) || 0;
@@ -1139,6 +1142,72 @@ export default function Dashboard({ onLogout }) {
     mostrarMensagem(`Dívida "${nomeBanco}" removida localmente.`);
   };
 
+  // Salvar / Editar Teto de Gastos por Categoria
+  const handleSaveTeto = async (tetoPayload) => {
+    try {
+      const res = await api.post('/api/finance/budget-limits', tetoPayload);
+      if (res.data?.success) {
+        setData(prev => {
+          const updated = { ...prev, tetosGastos: res.data.tetosGastos || prev.tetosGastos };
+          localStorage.setItem('finance_cached_data', JSON.stringify(updated));
+          return updated;
+        });
+        mostrarMensagem(res.data.mensagem || 'Teto de gastos salvo com sucesso!');
+        return;
+      }
+    } catch (err) {
+      console.warn('Fallback offline ao salvar teto:', err.message);
+    }
+
+    // Fallback local
+    setData(prev => {
+      const list = Array.isArray(prev.tetosGastos) ? [...prev.tetosGastos] : [];
+      const idx = list.findIndex(t => 
+        (tetoPayload.id && String(t.id) === String(tetoPayload.id)) || 
+        t.categoria.toLowerCase() === tetoPayload.categoria.toLowerCase()
+      );
+      const item = {
+        id: tetoPayload.id || (idx >= 0 ? list[idx].id : `teto-${Date.now()}`),
+        categoria: tetoPayload.categoria,
+        valorTeto: tetoPayload.valorTeto,
+        cor: tetoPayload.cor || '#10b981'
+      };
+      if (idx >= 0) list[idx] = item;
+      else list.push(item);
+
+      const updated = { ...prev, tetosGastos: list };
+      localStorage.setItem('finance_cached_data', JSON.stringify(updated));
+      return updated;
+    });
+    mostrarMensagem(`Teto para "${tetoPayload.categoria}" salvo localmente.`);
+  };
+
+  // Remover Teto de Gastos
+  const handleDeleteTeto = async (tetoId) => {
+    try {
+      const res = await api.delete(`/api/finance/budget-limits/${tetoId}`);
+      if (res.data?.success) {
+        setData(prev => {
+          const updated = { ...prev, tetosGastos: res.data.tetosGastos || prev.tetosGastos.filter(t => String(t.id) !== String(tetoId)) };
+          localStorage.setItem('finance_cached_data', JSON.stringify(updated));
+          return updated;
+        });
+        mostrarMensagem('Teto de gastos removido com sucesso!');
+        return;
+      }
+    } catch (err) {
+      console.warn('Fallback offline ao remover teto:', err.message);
+    }
+
+    setData(prev => {
+      const list = (prev.tetosGastos || []).filter(t => String(t.id) !== String(tetoId));
+      const updated = { ...prev, tetosGastos: list };
+      localStorage.setItem('finance_cached_data', JSON.stringify(updated));
+      return updated;
+    });
+    mostrarMensagem('Teto removido localmente.');
+  };
+
   // Cadastrar Nova Dívida (Multi-Dívidas)
   const handleSalvarNovaDivida = async (e) => {
     e.preventDefault();
@@ -1671,7 +1740,7 @@ export default function Dashboard({ onLogout }) {
               background: 'rgba(16,185,129,0.12)'
             }}
           >
-            📲
+            <Smartphone size={16} />
           </button>
           <button 
             onClick={handleExportarCSV} 
@@ -1679,7 +1748,7 @@ export default function Dashboard({ onLogout }) {
             title="Exportar Planilha Completa (Excel / CSV)"
             style={{ color: '#38bdf8', borderColor: 'rgba(56,189,248,0.4)', background: 'rgba(56,189,248,0.08)' }}
           >
-            📊
+            <FileSpreadsheet size={16} />
           </button>
           <button 
             onClick={pushPermissao === 'granted' ? handleTestarNotificacao : handleAtivarNotificacoes} 
@@ -1687,17 +1756,21 @@ export default function Dashboard({ onLogout }) {
             title={pushPermissao === 'granted' ? 'Notificações Ativas no Celular (Toque para testar alerta)' : 'Ativar Notificações no Celular / Navegador'}
             style={pushPermissao === 'granted' ? { color: '#fbbf24', borderColor: 'rgba(251,191,36,0.4)', background: 'rgba(251,191,36,0.1)' } : { color: '#94a3b8' }}
           >
-            {pushPermissao === 'granted' ? '🔔' : '🔕'}
+            {pushPermissao === 'granted' ? <Bell size={16} /> : <BellOff size={16} />}
           </button>
-          <button onClick={carregarDados} className="btn-icon" title="Sincronizar Oracle ATP">🔄</button>
-          <button onClick={onLogout} className="btn-icon" title="Sair">🚪</button>
+          <button onClick={carregarDados} className="btn-icon" title="Sincronizar Oracle ATP">
+            <RefreshCw size={15} />
+          </button>
+          <button onClick={onLogout} className="btn-icon" title="Sair" style={{ color: '#f43f5e' }}>
+            <LogOut size={15} />
+          </button>
         </div>
       </header>
 
       {/* Banner da Data de Hoje */}
       <div className="date-banner">
         <div className="date-badge">
-          <span>📅</span> <strong>Hoje:</strong> {dataHojeTexto}
+          <Calendar size={14} color="#10b981" /> <strong>Hoje:</strong> {dataHojeTexto}
         </div>
         <div className="date-user-chip">
           <div className="user-avatar-mini">{iniciais}</div>
@@ -2772,6 +2845,16 @@ export default function Dashboard({ onLogout }) {
                 )}
               </div>
             </section>
+
+            {/* TETO DE GASTOS / ORÇAMENTO POR CATEGORIA */}
+            <BudgetLimitsSection
+              tetos={data.tetosGastos || []}
+              despesasVariaveis={data.despesasVariaveis || []}
+              ocultarSaldos={ocultarSaldos}
+              formatCurrency={formatBRL}
+              onSaveTeto={handleSaveTeto}
+              onDeleteTeto={handleDeleteTeto}
+            />
           </>
         )}
 
@@ -2780,6 +2863,16 @@ export default function Dashboard({ onLogout }) {
         {/* ========================================================= */}
         {activeTab === 'gastos' && (
           <>
+            {/* TETO DE GASTOS / ORÇAMENTO POR CATEGORIA */}
+            <BudgetLimitsSection
+              tetos={data.tetosGastos || []}
+              despesasVariaveis={data.despesasVariaveis || []}
+              ocultarSaldos={ocultarSaldos}
+              formatCurrency={formatBRL}
+              onSaveTeto={handleSaveTeto}
+              onDeleteTeto={handleDeleteTeto}
+            />
+
             <section className="card">
               <div className="card-header" style={{ flexWrap: 'wrap', gap: '0.6rem' }}>
                 <div>
@@ -4210,48 +4303,8 @@ export default function Dashboard({ onLogout }) {
         )}
       </main>
 
-      {/* Barra de Navegação Inferior (Mobile Tabs Dock) */}
-      <nav className="bottom-nav-bar">
-        <button
-          onClick={() => setActiveTab('dashboard')}
-          className={`nav-tab-item ${activeTab === 'dashboard' ? 'active' : ''}`}
-        >
-          <span className="nav-tab-icon">📊</span>
-          <span className="nav-tab-label">Início</span>
-        </button>
-
-        <button
-          onClick={() => setActiveTab('gastos')}
-          className={`nav-tab-item ${activeTab === 'gastos' ? 'active' : ''}`}
-        >
-          <span className="nav-tab-icon">💸</span>
-          <span className="nav-tab-label">Gastos</span>
-        </button>
-
-        <button
-          onClick={() => setActiveTab('fixos')}
-          className={`nav-tab-item ${activeTab === 'fixos' ? 'active' : ''}`}
-        >
-          <span className="nav-tab-icon">🛡️</span>
-          <span className="nav-tab-label">Fixos</span>
-        </button>
-
-        <button
-          onClick={() => setActiveTab('metas')}
-          className={`nav-tab-item ${activeTab === 'metas' ? 'active' : ''}`}
-        >
-          <span className="nav-tab-icon">🎯</span>
-          <span className="nav-tab-label">Metas</span>
-        </button>
-
-        <button
-          onClick={() => setActiveTab('perfil')}
-          className={`nav-tab-item ${activeTab === 'perfil' ? 'active' : ''}`}
-        >
-          <span className="nav-tab-icon">👤</span>
-          <span className="nav-tab-label">Perfil</span>
-        </button>
-      </nav>
+      {/* Barra de Navegação Inferior (Mobile Tabs Dock) com Ícones SVG Lucide */}
+      <BottomNav activeTab={activeTab} onTabChange={setActiveTab} />
 
       {/* 1. MODAL CADASTRAR NOVA DÍVIDA COM PREVIEW DE PARCELAS */}
       {mostrarFormDivida && (
