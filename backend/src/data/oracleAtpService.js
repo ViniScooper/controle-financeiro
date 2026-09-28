@@ -588,6 +588,32 @@ async function rejectAccessRequest(requestId) {
   return true;
 }
 
+async function deleteAccessRequest(requestId) {
+  const list = loadLocalRequests();
+  const filtered = list.filter(r => String(r.id) !== String(requestId));
+  saveLocalRequests(filtered);
+
+  try {
+    const sql = `DELETE FROM FINANCIAL_ACCESS_REQUESTS WHERE ID = '${requestId}'`;
+    await executeSql(sql);
+  } catch (e) {}
+
+  return true;
+}
+
+async function clearAccessRequestsHistory() {
+  const list = loadLocalRequests();
+  const filtered = list.filter(r => r.status === 'pending');
+  saveLocalRequests(filtered);
+
+  try {
+    const sql = `DELETE FROM FINANCIAL_ACCESS_REQUESTS WHERE STATUS != 'pending'`;
+    await executeSql(sql);
+  } catch (e) {}
+
+  return true;
+}
+
 // ===============================
 // SOLICITAÇÕES DE RESET DE SENHA
 // ===============================
@@ -715,6 +741,28 @@ async function rejectPasswordReset(resetId) {
   return true;
 }
 
+async function deletePasswordReset(resetId) {
+  const list = loadLocalResets();
+  const filtered = list.filter(r => String(r.id) !== String(resetId));
+  saveLocalResets(filtered);
+  try {
+    const sql = `DELETE FROM FINANCIAL_PASSWORD_RESETS WHERE ID = '${resetId}'`;
+    await executeSql(sql);
+  } catch (e) {}
+  return true;
+}
+
+async function clearPasswordResetsHistory() {
+  const list = loadLocalResets();
+  const filtered = list.filter(r => r.status === 'pending');
+  saveLocalResets(filtered);
+  try {
+    const sql = `DELETE FROM FINANCIAL_PASSWORD_RESETS WHERE STATUS != 'pending'`;
+    await executeSql(sql);
+  } catch (e) {}
+  return true;
+}
+
 module.exports = {
   executeSql,
   initDatabase,
@@ -725,9 +773,13 @@ module.exports = {
   getAccessRequests,
   approveAccessRequest,
   rejectAccessRequest,
+  deleteAccessRequest,
+  clearAccessRequestsHistory,
   createPasswordResetRequest,
   getPasswordResetRequests,
   approvePasswordReset,
   rejectPasswordReset,
+  deletePasswordReset,
+  clearPasswordResetsHistory,
   VINI_INITIAL_DATA
 };

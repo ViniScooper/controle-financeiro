@@ -409,4 +409,86 @@ router.post('/reject-password-reset', async (req, res) => {
   }
 });
 
+// DELETE /api/auth/requests/:id (Exclui solicitação individual)
+router.delete('/requests/:id', async (req, res) => {
+  try {
+    const authHeader = req.headers.authorization;
+    if (!authHeader) return res.status(401).json({ success: false, erro: 'Não autorizado' });
+    const token = authHeader.replace(/^Bearer\s+/i, '');
+    const decoded = jwt.verify(token, JWT_SECRET);
+
+    if (!isAdminUser(decoded.email)) {
+      return res.status(403).json({ success: false, erro: 'Apenas o administrador pode excluir solicitações.' });
+    }
+
+    const { id } = req.params;
+    await oracleAtp.deleteAccessRequest(id);
+
+    return res.json({ success: true, mensagem: 'Solicitação removida do histórico com sucesso!' });
+  } catch (err) {
+    return res.status(500).json({ success: false, erro: err.message });
+  }
+});
+
+// DELETE /api/auth/requests-history (Limpa histórico de solicitações aprovadas/rejeitadas)
+router.delete('/requests-history', async (req, res) => {
+  try {
+    const authHeader = req.headers.authorization;
+    if (!authHeader) return res.status(401).json({ success: false, erro: 'Não autorizado' });
+    const token = authHeader.replace(/^Bearer\s+/i, '');
+    const decoded = jwt.verify(token, JWT_SECRET);
+
+    if (!isAdminUser(decoded.email)) {
+      return res.status(403).json({ success: false, erro: 'Apenas o administrador pode limpar o histórico.' });
+    }
+
+    await oracleAtp.clearAccessRequestsHistory();
+
+    return res.json({ success: true, mensagem: 'Histórico de solicitações limpo com sucesso!' });
+  } catch (err) {
+    return res.status(500).json({ success: false, erro: err.message });
+  }
+});
+
+// DELETE /api/auth/password-resets/:id (Exclui pedido de reset individual)
+router.delete('/password-resets/:id', async (req, res) => {
+  try {
+    const authHeader = req.headers.authorization;
+    if (!authHeader) return res.status(401).json({ success: false, erro: 'Não autorizado' });
+    const token = authHeader.replace(/^Bearer\s+/i, '');
+    const decoded = jwt.verify(token, JWT_SECRET);
+
+    if (!isAdminUser(decoded.email)) {
+      return res.status(403).json({ success: false, erro: 'Apenas o administrador pode excluir pedidos de reset.' });
+    }
+
+    const { id } = req.params;
+    await oracleAtp.deletePasswordReset(id);
+
+    return res.json({ success: true, mensagem: 'Pedido de reset removido com sucesso!' });
+  } catch (err) {
+    return res.status(500).json({ success: false, erro: err.message });
+  }
+});
+
+// DELETE /api/auth/password-resets-history (Limpa histórico de resets)
+router.delete('/password-resets-history', async (req, res) => {
+  try {
+    const authHeader = req.headers.authorization;
+    if (!authHeader) return res.status(401).json({ success: false, erro: 'Não autorizado' });
+    const token = authHeader.replace(/^Bearer\s+/i, '');
+    const decoded = jwt.verify(token, JWT_SECRET);
+
+    if (!isAdminUser(decoded.email)) {
+      return res.status(403).json({ success: false, erro: 'Apenas o administrador pode limpar o histórico.' });
+    }
+
+    await oracleAtp.clearPasswordResetsHistory();
+
+    return res.json({ success: true, mensagem: 'Histórico de resets limpo com sucesso!' });
+  } catch (err) {
+    return res.status(500).json({ success: false, erro: err.message });
+  }
+});
+
 module.exports = router;

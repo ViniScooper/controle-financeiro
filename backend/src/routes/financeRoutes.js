@@ -811,8 +811,10 @@ router.post('/fixed-expenses', async (req, res) => {
       id: Date.now(),
       nome: String(nome).trim(),
       valor: Math.abs(Number(valor)),
-      categoria: categoria || 'Essencial',
-      pago: false
+      categoria: (categoria || 'Essencial').trim(),
+      pago: false,
+      dataPagamento: null,
+      mesReferencia: null
     };
 
     if (!data.gastosFixos) data.gastosFixos = [];
@@ -842,17 +844,29 @@ router.patch('/fixed-expenses/:id', async (req, res) => {
 
     const data = userRecord.data;
     const { id } = req.params;
-    const { pago, valor, nome, categoria } = req.body;
+    const { pago, valor, nome, categoria, dataPagamento, mesReferencia } = req.body;
 
     const idx = (data.gastosFixos || []).findIndex(g => String(g.id) === String(id));
     if (idx === -1) {
       return res.status(404).json({ success: false, erro: 'Gasto fixo não encontrado.' });
     }
 
-    if (pago !== undefined) data.gastosFixos[idx].pago = Boolean(pago);
+    if (pago !== undefined) {
+      const isPago = Boolean(pago);
+      data.gastosFixos[idx].pago = isPago;
+      if (isPago) {
+        data.gastosFixos[idx].dataPagamento = dataPagamento || new Date().toISOString().split('T')[0];
+        data.gastosFixos[idx].mesReferencia = mesReferencia || new Date().toISOString().slice(0, 7);
+      } else {
+        data.gastosFixos[idx].dataPagamento = null;
+        data.gastosFixos[idx].mesReferencia = null;
+      }
+    }
     if (valor !== undefined && !isNaN(Number(valor))) data.gastosFixos[idx].valor = Math.abs(Number(valor));
     if (nome) data.gastosFixos[idx].nome = String(nome).trim();
     if (categoria) data.gastosFixos[idx].categoria = String(categoria).trim();
+    if (dataPagamento !== undefined && pago === undefined) data.gastosFixos[idx].dataPagamento = dataPagamento;
+    if (mesReferencia !== undefined && pago === undefined) data.gastosFixos[idx].mesReferencia = mesReferencia;
 
     await oracleAtp.saveUser(userEmail, userRecord.name, userRecord.password, data);
     const summary = computeSummary(data);

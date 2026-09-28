@@ -155,6 +155,7 @@ export default function Dashboard({ onLogout }) {
   const [novoFixoNome, setNovoFixoNome] = useState('');
   const [novoFixoValor, setNovoFixoValor] = useState('');
   const [novoFixoCategoria, setNovoFixoCategoria] = useState('Saúde');
+  const [novoFixoCategoriaCustom, setNovoFixoCategoriaCustom] = useState('');
 
   // Formulário: Nova Meta
   const [novaMetaTitulo, setNovaMetaTitulo] = useState('');
@@ -866,6 +867,58 @@ export default function Dashboard({ onLogout }) {
     }
   };
 
+  const handleExcluirSolicitacao = async (requestId) => {
+    if (!window.confirm('Tem certeza que deseja excluir esta solicitação do histórico?')) return;
+    try {
+      const res = await api.delete(`/api/auth/requests/${requestId}`);
+      if (res.data?.success) {
+        mostrarMensagem('Solicitação removida com sucesso!');
+        setSolicitacoes(prev => prev.filter(s => String(s.id) !== String(requestId)));
+      }
+    } catch (err) {
+      mostrarMensagem('Erro ao excluir: ' + (err.response?.data?.erro || err.message));
+    }
+  };
+
+  const handleLimparHistoricoSolicitacoes = async () => {
+    if (!window.confirm('Deseja excluir todas as solicitações já concluídas (aprovadas e rejeitadas) do histórico?')) return;
+    try {
+      const res = await api.delete('/api/auth/requests-history');
+      if (res.data?.success) {
+        mostrarMensagem('Histórico concluído limpo com sucesso!');
+        setSolicitacoes(prev => prev.filter(s => s.status === 'pending'));
+      }
+    } catch (err) {
+      mostrarMensagem('Erro ao limpar histórico: ' + (err.response?.data?.erro || err.message));
+    }
+  };
+
+  const handleExcluirReset = async (resetId) => {
+    if (!window.confirm('Tem certeza que deseja excluir este pedido de reset?')) return;
+    try {
+      const res = await api.delete(`/api/auth/password-resets/${resetId}`);
+      if (res.data?.success) {
+        mostrarMensagem('Pedido de reset removido!');
+        setResetsSenha(prev => prev.filter(r => String(r.id) !== String(resetId)));
+      }
+    } catch (err) {
+      mostrarMensagem('Erro ao excluir reset: ' + (err.response?.data?.erro || err.message));
+    }
+  };
+
+  const handleLimparHistoricoResets = async () => {
+    if (!window.confirm('Deseja limpar todo o histórico de resets já processados?')) return;
+    try {
+      const res = await api.delete('/api/auth/password-resets-history');
+      if (res.data?.success) {
+        mostrarMensagem('Histórico de resets limpo!');
+        setResetsSenha(prev => prev.filter(r => r.status === 'pending'));
+      }
+    } catch (err) {
+      mostrarMensagem('Erro ao limpar resets: ' + (err.response?.data?.erro || err.message));
+    }
+  };
+
   // Alternar Status de Parcela (Paga / Pendente)
   const toggleParcela = async (parcela, debtId) => {
     const novoStatus = !parcela.paga;
@@ -1355,37 +1408,56 @@ export default function Dashboard({ onLogout }) {
     } catch (e) {}
   };
 
-  // Alternar checkbox gasto fixo
+  // Alternar checkbox gasto fixo (com ciclo mensal e data de pagamento)
   const toggleGastoFixo = async (gasto) => {
-    const novoStatus = !gasto.pago;
+    // Se estava pago no mês atual/ativo, agora desmarca. Caso contrário, marca como pago no mês atual/ativo
+    const jaPagoNoMesAtivo = Boolean(gasto.pago) && (!gasto.mesReferencia || gasto.mesReferencia === mesAtivo);
+    const novoStatus = !jaPagoNoMesAtivo;
+    const dataHojeIso = new Date().toISOString().split('T')[0];
+
+    const gastoAtualizado = {
+      ...gasto,
+      pago: novoStatus,
+      dataPagamento: novoStatus ? dataHojeIso : null,
+      mesReferencia: novoStatus ? mesAtivo : null
+    };
+
     const novoData = {
       ...data,
-      gastosFixos: data.gastosFixos.map(g =>
-        g.id === gasto.id ? { ...g, pago: novoStatus } : g
+      gastosFixos: (data.gastosFixos || []).map(g =>
+        g.id === gasto.id ? gastoAtualizado : g
       )
     };
     setData(novoData);
     localStorage.setItem('finance_cached_data', JSON.stringify(novoData));
 
     try {
-      await api.patch(`/api/finance/fixed-expenses/${gasto.id}`, { pago: novoStatus });
+      await api.patch(`/api/finance/fixed-expenses/${gasto.id}`, {
+        pago: novoStatus,
+        dataPagamento: gastoAtualizado.dataPagamento,
+        mesReferencia: gastoAtualizado.mesReferencia
+      });
     } catch (e) {}
   };
 
-  // Cadastrar novo gasto fixo
+  // Cadastrar novo gasto fixo (com suporte a categoria personalizada)
   const handleAdicionarFixo = async (e) => {
     e.preventDefault();
     if (!novoFixoNome.trim() || !novoFixoValor) return;
 
-    const valNum = parseFloat(novoFixoValor.replace(',', '.'));
+    const valNum = parseFloat(String(novoFixoValor).replace(',', '.'));
     if (isNaN(valNum) || valNum <= 0) return;
+
+    const categoriaFinal = (novoFixoCategoria === 'Outra' ? novoFixoCategoriaCustom : novoFixoCategoria) || 'Essencial';
 
     const novoFixo = {
       id: Date.now(),
       nome: novoFixoNome.trim(),
       valor: valNum,
-      categoria: novoFixoCategoria,
-      pago: false
+      categoria: categoriaFinal.trim(),
+      pago: false,
+      dataPagamento: null,
+      mesReferencia: null
     };
 
     const novoData = {
@@ -1397,6 +1469,7 @@ export default function Dashboard({ onLogout }) {
 
     setNovoFixoNome('');
     setNovoFixoValor('');
+    setNovoFixoCategoriaCustom('');
     mostrarMensagem('Gasto fixo cadastrado com sucesso!');
 
     try {
@@ -3044,7 +3117,7 @@ export default function Dashboard({ onLogout }) {
                   />
                 </div>
 
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem' }}>
+                <div style={{ display: 'grid', gridTemplateColumns: novoFixoCategoria === 'Outra' ? '1fr 1fr 1fr' : '1fr 1fr', gap: '0.5rem' }}>
                   <select
                     className="select-field"
                     value={novoFixoCategoria}
@@ -3055,7 +3128,20 @@ export default function Dashboard({ onLogout }) {
                     <option value="Essencial">📱 Essencial / Telecom</option>
                     <option value="Educação">📚 Educação</option>
                     <option value="Lazer">🎉 Assinatura / Lazer</option>
+                    <option value="Moradia">🏠 Moradia / Condomínio</option>
+                    <option value="Outra">➕ Outra Categoria...</option>
                   </select>
+
+                  {novoFixoCategoria === 'Outra' && (
+                    <input
+                      type="text"
+                      className="input-field"
+                      placeholder="Nome da Categoria..."
+                      value={novoFixoCategoriaCustom}
+                      onChange={(e) => setNovoFixoCategoriaCustom(e.target.value)}
+                      required
+                    />
+                  )}
 
                   <button type="submit" className="btn-primary">
                     + Salvar Gasto Fixo
@@ -3065,12 +3151,61 @@ export default function Dashboard({ onLogout }) {
             </section>
 
             <section className="card">
-              <div className="card-header">
-                <div className="card-title">
-                  <span>📋</span> Seus Gastos Fixos Ativos
+              <div className="card-header" style={{ flexWrap: 'wrap', gap: '0.5rem' }}>
+                <div>
+                  <div className="card-title">
+                    <span>📋</span> Seus Gastos Fixos Ativos ({MESES_DISPONIVEIS.find(m => m.id === mesAtivo)?.rotulo || 'Mês'})
+                  </div>
+                  <div className="card-subtitle">
+                    Marque o que já pagou neste mês. Na virada do mês, o sistema desmarca automaticamente!
+                  </div>
                 </div>
-                <span style={{ fontSize: '0.72rem', color: '#64748b' }}>Marque o que já pagou</span>
+                {(() => {
+                  const fixos = data.gastosFixos || [];
+                  const pagosNoMes = fixos.filter(g => Boolean(g.pago) && (!g.mesReferencia || g.mesReferencia === mesAtivo)).length;
+                  const todosPagos = fixos.length > 0 && pagosNoMes === fixos.length;
+                  return (
+                    <span className="badge-tag" style={{
+                      color: todosPagos ? '#10b981' : '#38bdf8',
+                      borderColor: todosPagos ? 'rgba(16,185,129,0.4)' : 'rgba(56,189,248,0.3)',
+                      background: todosPagos ? 'rgba(16,185,129,0.1)' : 'rgba(56,189,248,0.06)'
+                    }}>
+                      {pagosNoMes} de {fixos.length} Pagos
+                    </span>
+                  );
+                })()}
               </div>
+
+              {/* Banner comemorativo se 100% dos custos fixos estiverem pagos no mês */}
+              {(() => {
+                const fixos = data.gastosFixos || [];
+                const pagosNoMes = fixos.filter(g => Boolean(g.pago) && (!g.mesReferencia || g.mesReferencia === mesAtivo)).length;
+                if (fixos.length > 0 && pagosNoMes === fixos.length) {
+                  return (
+                    <div style={{
+                      background: 'linear-gradient(135deg, rgba(16, 185, 129, 0.15) 0%, rgba(5, 150, 105, 0.2) 100%)',
+                      border: '1px solid rgba(16, 185, 129, 0.4)',
+                      borderRadius: '12px',
+                      padding: '0.85rem 1rem',
+                      marginBottom: '1rem',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '0.65rem'
+                    }}>
+                      <span style={{ fontSize: '1.4rem' }}>🎉</span>
+                      <div>
+                        <strong style={{ color: '#34d399', fontSize: '0.88rem', display: 'block' }}>
+                          Parabéns! Todos os custos fixos estão 100% pagos neste mês!
+                        </strong>
+                        <span style={{ color: '#94a3b8', fontSize: '0.74rem' }}>
+                          Nenhum custo fixo pendente para {MESES_DISPONIVEIS.find(m => m.id === mesAtivo)?.curto || 'este mês'}.
+                        </span>
+                      </div>
+                    </div>
+                  );
+                }
+                return null;
+              })()}
 
               <div className="fixed-expenses-list">
                 {(data.gastosFixos || []).length === 0 ? (
@@ -3078,34 +3213,41 @@ export default function Dashboard({ onLogout }) {
                     Nenhum gasto fixo cadastrado ainda. Use o formulário acima!
                   </div>
                 ) : (
-                  (data.gastosFixos || []).map((gasto) => (
-                    <div key={gasto.id} className="fixed-expense-row">
-                      <div className="fixed-expense-left">
-                        <input
-                          type="checkbox"
-                          className="fixed-checkbox"
-                          checked={Boolean(gasto.pago)}
-                          onChange={() => toggleGastoFixo(gasto)}
-                        />
-                        <div>
-                          <div className="fixed-name">{gasto.nome}</div>
-                          <div style={{ fontSize: '0.7rem', color: '#64748b' }}>
-                            {gasto.categoria} • {gasto.pago ? 'Pago no mês ✓' : 'Pendente'}
+                  (data.gastosFixos || []).map((gasto) => {
+                    const pagoNoMes = Boolean(gasto.pago) && (!gasto.mesReferencia || gasto.mesReferencia === mesAtivo);
+                    const dataPagtoFormatada = gasto.dataPagamento ? formatDate(gasto.dataPagamento) : null;
+
+                    return (
+                      <div key={gasto.id} className={`fixed-expense-row ${pagoNoMes ? 'is-paid' : ''}`} style={pagoNoMes ? { borderColor: 'rgba(16,185,129,0.3)', background: 'rgba(16,185,129,0.03)' } : {}}>
+                        <div className="fixed-expense-left">
+                          <input
+                            type="checkbox"
+                            className="fixed-checkbox"
+                            checked={pagoNoMes}
+                            onChange={() => toggleGastoFixo(gasto)}
+                          />
+                          <div>
+                            <div className="fixed-name" style={pagoNoMes ? { color: '#f8fafc' } : {}}>{gasto.nome}</div>
+                            <div style={{ fontSize: '0.7rem', color: pagoNoMes ? '#34d399' : '#64748b', display: 'flex', alignItems: 'center', gap: '0.35rem', flexWrap: 'wrap' }}>
+                              <span>{gasto.categoria}</span>
+                              <span>•</span>
+                              <span>{pagoNoMes ? (dataPagtoFormatada ? `Pago em ${dataPagtoFormatada} ✓` : 'Pago no mês ✓') : 'Pendente'}</span>
+                            </div>
                           </div>
                         </div>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem' }}>
+                          <div className="fixed-val" style={pagoNoMes ? { color: '#34d399' } : {}}>{formatBRL(gasto.valor)}</div>
+                          <button
+                            onClick={() => handleRemoverFixo(gasto.id)}
+                            className="btn-del"
+                            title="Excluir gasto fixo"
+                          >
+                            ✕
+                          </button>
+                        </div>
                       </div>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem' }}>
-                        <div className="fixed-val">{formatBRL(gasto.valor)}</div>
-                        <button
-                          onClick={() => handleRemoverFixo(gasto.id)}
-                          className="btn-del"
-                          title="Excluir gasto fixo"
-                        >
-                          ✕
-                        </button>
-                      </div>
-                    </div>
-                  ))
+                    );
+                  })
                 )}
               </div>
             </section>
@@ -3506,56 +3648,81 @@ export default function Dashboard({ onLogout }) {
                   </div>
                 )}
 
-                {/* Filtros de Lista */}
-                <div style={{ display: 'flex', gap: '0.35rem', marginBottom: '0.85rem' }}>
-                  <button
-                    type="button"
-                    onClick={() => setFiltroSolicitacao('pending')}
-                    style={{
-                      padding: '0.35rem 0.65rem',
-                      borderRadius: '6px',
-                      fontSize: '0.72rem',
-                      fontWeight: 600,
-                      border: 'none',
-                      cursor: 'pointer',
-                      background: filtroSolicitacao === 'pending' ? '#f59e0b' : 'rgba(255,255,255,0.06)',
-                      color: filtroSolicitacao === 'pending' ? '#000' : '#94a3b8'
-                    }}
-                  >
-                    Pendentes ({solicitacoes.filter(s => s.status === 'pending').length})
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setFiltroSolicitacao('approved')}
-                    style={{
-                      padding: '0.35rem 0.65rem',
-                      borderRadius: '6px',
-                      fontSize: '0.72rem',
-                      fontWeight: 600,
-                      border: 'none',
-                      cursor: 'pointer',
-                      background: filtroSolicitacao === 'approved' ? '#10b981' : 'rgba(255,255,255,0.06)',
-                      color: filtroSolicitacao === 'approved' ? '#fff' : '#94a3b8'
-                    }}
-                  >
-                    Aprovados ({solicitacoes.filter(s => s.status === 'approved').length})
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setFiltroSolicitacao('todas')}
-                    style={{
-                      padding: '0.35rem 0.65rem',
-                      borderRadius: '6px',
-                      fontSize: '0.72rem',
-                      fontWeight: 600,
-                      border: 'none',
-                      cursor: 'pointer',
-                      background: filtroSolicitacao === 'todas' ? '#3b82f6' : 'rgba(255,255,255,0.06)',
-                      color: filtroSolicitacao === 'todas' ? '#fff' : '#94a3b8'
-                    }}
-                  >
-                    Todas ({solicitacoes.length})
-                  </button>
+                {/* Filtros de Lista e Botão Limpar Histórico */}
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.5rem', marginBottom: '0.85rem' }}>
+                  <div style={{ display: 'flex', gap: '0.35rem' }}>
+                    <button
+                      type="button"
+                      onClick={() => setFiltroSolicitacao('pending')}
+                      style={{
+                        padding: '0.35rem 0.65rem',
+                        borderRadius: '6px',
+                        fontSize: '0.72rem',
+                        fontWeight: 600,
+                        border: 'none',
+                        cursor: 'pointer',
+                        background: filtroSolicitacao === 'pending' ? '#f59e0b' : 'rgba(255,255,255,0.06)',
+                        color: filtroSolicitacao === 'pending' ? '#000' : '#94a3b8'
+                      }}
+                    >
+                      Pendentes ({solicitacoes.filter(s => s.status === 'pending').length})
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setFiltroSolicitacao('approved')}
+                      style={{
+                        padding: '0.35rem 0.65rem',
+                        borderRadius: '6px',
+                        fontSize: '0.72rem',
+                        fontWeight: 600,
+                        border: 'none',
+                        cursor: 'pointer',
+                        background: filtroSolicitacao === 'approved' ? '#10b981' : 'rgba(255,255,255,0.06)',
+                        color: filtroSolicitacao === 'approved' ? '#fff' : '#94a3b8'
+                      }}
+                    >
+                      Aprovados ({solicitacoes.filter(s => s.status === 'approved').length})
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setFiltroSolicitacao('todas')}
+                      style={{
+                        padding: '0.35rem 0.65rem',
+                        borderRadius: '6px',
+                        fontSize: '0.72rem',
+                        fontWeight: 600,
+                        border: 'none',
+                        cursor: 'pointer',
+                        background: filtroSolicitacao === 'todas' ? '#3b82f6' : 'rgba(255,255,255,0.06)',
+                        color: filtroSolicitacao === 'todas' ? '#fff' : '#94a3b8'
+                      }}
+                    >
+                      Todas ({solicitacoes.length})
+                    </button>
+                  </div>
+
+                  {solicitacoes.some(s => s.status !== 'pending') && (
+                    <button
+                      type="button"
+                      onClick={handleLimparHistoricoSolicitacoes}
+                      style={{
+                        padding: '0.35rem 0.65rem',
+                        borderRadius: '6px',
+                        fontSize: '0.72rem',
+                        fontWeight: 600,
+                        background: 'rgba(244, 63, 94, 0.1)',
+                        color: '#f43f5e',
+                        border: '1px solid rgba(244, 63, 94, 0.3)',
+                        cursor: 'pointer',
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: '0.3rem'
+                      }}
+                      title="Excluir do banco todas as solicitações já aprovadas ou rejeitadas"
+                    >
+                      <span>🧹</span> Limpar Histórico Concluído
+                    </button>
+                  )}
                 </div>
 
                 {/* Lista de Solicitações */}
@@ -3598,16 +3765,36 @@ export default function Dashboard({ onLogout }) {
                               <span style={{ fontSize: '1rem' }}>👤</span>
                               <strong style={{ fontSize: '0.85rem', color: '#f8fafc' }}>{item.name}</strong>
                             </div>
-                            <span style={{
-                              fontSize: '0.68rem',
-                              fontWeight: 700,
-                              padding: '0.2rem 0.5rem',
-                              borderRadius: '4px',
-                              background: isPending ? 'rgba(245, 158, 11, 0.15)' : isApproved ? 'rgba(16, 185, 129, 0.15)' : 'rgba(244, 63, 94, 0.15)',
-                              color: isPending ? '#fbbf24' : isApproved ? '#34d399' : '#f87171'
-                            }}>
-                              {isPending ? '⏳ Aguardando Aprovação' : isApproved ? '✅ Aprovado' : '❌ Rejeitado'}
-                            </span>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                              <span style={{
+                                fontSize: '0.68rem',
+                                fontWeight: 700,
+                                padding: '0.2rem 0.5rem',
+                                borderRadius: '4px',
+                                background: isPending ? 'rgba(245, 158, 11, 0.15)' : isApproved ? 'rgba(16, 185, 129, 0.15)' : 'rgba(244, 63, 94, 0.15)',
+                                color: isPending ? '#fbbf24' : isApproved ? '#34d399' : '#f87171'
+                              }}>
+                                {isPending ? '⏳ Aguardando Aprovação' : isApproved ? '✅ Aprovado' : '❌ Rejeitado'}
+                              </span>
+                              {!isPending && (
+                                <button
+                                  type="button"
+                                  onClick={() => handleExcluirSolicitacao(item.id)}
+                                  style={{
+                                    background: 'rgba(244, 63, 94, 0.12)',
+                                    color: '#f43f5e',
+                                    border: '1px solid rgba(244, 63, 94, 0.3)',
+                                    borderRadius: '5px',
+                                    padding: '0.2rem 0.45rem',
+                                    fontSize: '0.7rem',
+                                    cursor: 'pointer'
+                                  }}
+                                  title="Excluir solicitação do histórico"
+                                >
+                                  🗑️
+                                </button>
+                              )}
+                            </div>
                           </div>
 
                           <div style={{ fontSize: '0.74rem', color: '#94a3b8', display: 'grid', gridTemplateColumns: '1fr', gap: '0.2rem', marginBottom: '0.65rem' }}>
