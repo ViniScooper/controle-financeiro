@@ -30,7 +30,8 @@ export const DEFAULT_FINANCE_STATE = {
     motivoRendaExtra: "",
     meta: "Controle financeiro pessoal e quitação de despesas"
   },
-  dividaItau: null, // Sem dívidas pré-cadastradas
+  dividas: [], // Lista de dívidas e acordos com parcelas individuais
+  dividaItau: null, // Legado / retrocompatibilidade
   parcelas: [],
   gastosFixos: [],
   despesasVariaveis: [],
@@ -44,19 +45,47 @@ export function calculateFinancialSummary(data = {}) {
   const rendaExtra = Number(data.perfil?.rendaExtraMes || 0);
   const rendaTotalMes = renda + rendaExtra;
 
-  const parcelas = data.parcelas || [];
-  const parcelasPagas = parcelas.filter(p => p.paga);
-  const totalAmortizado = parcelasPagas.reduce((acc, p) => acc + Number(p.valor || 0), 0);
+  // Unifica dívidas: usa data.dividas se existir ou migra dividaItau legado
+  let listaDividas = Array.isArray(data.dividas) ? [...data.dividas] : [];
+  if (listaDividas.length === 0 && data.dividaItau && (Number(data.dividaItau.valorTotalAcordo) > 0 || Number(data.dividaItau.valorParcela) > 0)) {
+    listaDividas.push({
+      id: 'divida-itau',
+      banco: data.dividaItau.banco || 'Itaú Click',
+      valorTotalAcordo: Number(data.dividaItau.valorTotalAcordo || 0),
+      valorParcela: Number(data.dividaItau.valorParcela || 0),
+      quantidadeParcelas: Number(data.dividaItau.quantidadeParcelas || data.parcelas?.length || 6),
+      observacao: 'Acordo Itaú Click',
+      parcelas: Array.isArray(data.parcelas) ? data.parcelas : []
+    });
+  }
 
-  // Dívidas / Acordos: só calcula se o usuário de fato cadastrou uma dívida
-  const temDivida = Boolean(data.dividaItau && (Number(data.dividaItau.valorTotalAcordo) > 0 || Number(data.dividaItau.valorParcela) > 0));
-  const valorParcela = temDivida ? Number(data.dividaItau?.valorParcela || (parcelas.length > 0 ? parcelas[0].valor : 0)) : 0;
-  const valorTotalAcordo = temDivida ? Number(data.dividaItau?.valorTotalAcordo || 0) : 0;
-  const saldoDevedorRestante = temDivida ? Math.max(0, valorTotalAcordo - totalAmortizado) : 0;
+  let totalAmortizado = 0;
+  let valorTotalAcordo = 0;
+  let valorParcelaMensal = 0;
+  let parcelasPagasCount = 0;
+  let totalParcelasCount = 0;
+
+  listaDividas.forEach(d => {
+    const parcs = Array.isArray(d.parcelas) ? d.parcelas : [];
+    totalParcelasCount += parcs.length;
+    const pagas = parcs.filter(p => p.paga);
+    parcelasPagasCount += pagas.length;
+    totalAmortizado += pagas.reduce((acc, p) => acc + Number(p.valor || 0), 0);
+    valorTotalAcordo += Number(d.valorTotalAcordo || (parcs.reduce((acc, p) => acc + Number(p.valor || 0), 0)));
+
+    const proxNaoPaga = parcs.find(p => !p.paga);
+    if (proxNaoPaga) {
+      valorParcelaMensal += Number(proxNaoPaga.valor || d.valorParcela || 0);
+    } else if (parcs.length === 0 && d.valorParcela) {
+      valorParcelaMensal += Number(d.valorParcela || 0);
+    }
+  });
+
+  const saldoDevedorRestante = Math.max(0, valorTotalAcordo - totalAmortizado);
   const percentualQuitado = valorTotalAcordo > 0 ? Math.min(100, Math.round((totalAmortizado / valorTotalAcordo) * 100)) : 0;
 
   const totalFixos = (data.gastosFixos || []).reduce((acc, g) => acc + Number(g.valor || 0), 0);
-  const totalComprometido = valorParcela + totalFixos;
+  const totalComprometido = valorParcelaMensal + totalFixos;
   const saldoLivreBase = rendaTotalMes - totalComprometido;
 
   const totalVariavel = (data.despesasVariaveis || []).reduce((acc, d) => acc + Number(d.valor || 0), 0);
@@ -74,7 +103,7 @@ export function calculateFinancialSummary(data = {}) {
     rendaExtra,
     rendaTotalMes,
     motivoRendaExtra: data.perfil?.motivoRendaExtra || '',
-    valorParcela,
+    valorParcela: valorParcelaMensal,
     totalFixos,
     totalFaturasCartoes,
     totalFaturasPendentes,
@@ -83,14 +112,15 @@ export function calculateFinancialSummary(data = {}) {
     saldoLivreBase,
     totalVariavel,
     saldoLivreAtual,
-    parcelasPagasCount: parcelasPagas.length,
-    totalParcelas: parcelas.length,
+    parcelasPagasCount,
+    totalParcelas: totalParcelasCount,
     totalAmortizado,
     valorTotalAcordo,
     saldoDevedorRestante,
     percentualQuitado,
     totalMetasAlvo,
-    totalMetasPoupado
+    totalMetasPoupado,
+    dividasCount: listaDividas.length
   };
 }
 

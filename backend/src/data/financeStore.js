@@ -15,6 +15,30 @@ const INITIAL_DATA = {
     motivoRendaExtra: "",
     meta: "Controle financeiro pessoal e quitação de despesas"
   },
+  dividas: [
+    {
+      id: "divida-itau",
+      banco: "Itaú Click",
+      faturaAgosto: 8390.72,
+      entradaAgostoPaga: 797.12,
+      saldoFinanciadoComIOF: 7697.30,
+      taxaJurosMensal: "12,9% a.m.",
+      taxaJurosAnual: "337,63% a.a.",
+      jurosTotais: 3915.28,
+      valorTotalAcordo: 11612.58,
+      quantidadeParcelas: 6,
+      valorParcela: 1935.43,
+      observacao: "Acordo renegociação cartão Itaú Click 6x",
+      parcelas: [
+        { id: 1, numero: 1, vencimento: "2026-09-05", valor: 1935.43, paga: true, dataPagamento: "2026-09-05", observacao: "1ª parcela do acordo Itaú paga em dia" },
+        { id: 2, numero: 2, vencimento: "2026-10-05", valor: 1935.43, paga: false, dataPagamento: null, observacao: "Pagar parcela regular + antecipar com 1ª parcela do 13º salário" },
+        { id: 3, numero: 3, vencimento: "2026-11-05", valor: 1935.43, paga: false, dataPagamento: null, observacao: "Pagar parcela regular + antecipar com 2ª parcela do 13º (Expectativa de quitação total!)" },
+        { id: 4, numero: 4, vencimento: "2026-12-05", valor: 1935.43, paga: false, dataPagamento: null, observacao: "4ª parcela (se necessária) + 3ª parcela do 13º salário" },
+        { id: 5, numero: 5, vencimento: "2027-01-05", valor: 1935.43, paga: false, dataPagamento: null, observacao: "5ª parcela (Penúltima)" },
+        { id: 6, numero: 6, vencimento: "2027-02-05", valor: 1935.43, paga: false, dataPagamento: null, observacao: "6ª parcela (Última)" }
+      ]
+    }
+  ],
   dividaItau: {
     banco: "Itaú Click",
     faturaAgosto: 8390.72,
@@ -181,6 +205,26 @@ function getData() {
     const parsed = JSON.parse(raw);
     // Assegura campos de metas e perfil
     if (!parsed.metas) parsed.metas = INITIAL_DATA.metas;
+    if (!Array.isArray(parsed.dividas)) {
+      parsed.dividas = [];
+      if (parsed.dividaItau && (parsed.dividaItau.banco || parsed.dividaItau.valorTotalAcordo)) {
+        parsed.dividas.push({
+          id: "divida-itau",
+          banco: parsed.dividaItau.banco || "Itaú Click",
+          faturaAgosto: parsed.dividaItau.faturaAgosto,
+          entradaAgostoPaga: parsed.dividaItau.entradaAgostoPaga,
+          saldoFinanciadoComIOF: parsed.dividaItau.saldoFinanciadoComIOF,
+          taxaJurosMensal: parsed.dividaItau.taxaJurosMensal,
+          taxaJurosAnual: parsed.dividaItau.taxaJurosAnual,
+          jurosTotais: parsed.dividaItau.jurosTotais,
+          valorTotalAcordo: Number(parsed.dividaItau.valorTotalAcordo || 0),
+          quantidadeParcelas: Number(parsed.dividaItau.quantidadeParcelas || parsed.parcelas?.length || 6),
+          valorParcela: Number(parsed.dividaItau.valorParcela || 0),
+          observacao: "Acordo Itaú Click",
+          parcelas: Array.isArray(parsed.parcelas) ? parsed.parcelas : []
+        });
+      }
+    }
     if (parsed.perfil && parsed.perfil.rendaExtraMes === undefined) {
       parsed.perfil.rendaExtraMes = 0;
       parsed.perfil.motivoRendaExtra = "";

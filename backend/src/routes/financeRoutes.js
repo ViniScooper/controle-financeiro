@@ -48,26 +48,90 @@ function getUserEmail(req) {
   return null;
 }
 
+function ensureDividas(data) {
+  if (!data) return data;
+  if (!Array.isArray(data.dividas)) {
+    data.dividas = [];
+  }
+  if (data.dividas.length === 0 && data.dividaItau && (data.dividaItau.banco || data.dividaItau.valorTotalAcordo)) {
+    data.dividas.push({
+      id: 'divida-itau',
+      banco: data.dividaItau.banco || 'Itaú Click',
+      faturaAgosto: data.dividaItau.faturaAgosto,
+      entradaAgostoPaga: data.dividaItau.entradaAgostoPaga,
+      saldoFinanciadoComIOF: data.dividaItau.saldoFinanciadoComIOF,
+      taxaJurosMensal: data.dividaItau.taxaJurosMensal,
+      taxaJurosAnual: data.dividaItau.taxaJurosAnual,
+      jurosTotais: data.dividaItau.jurosTotais,
+      valorTotalAcordo: Number(data.dividaItau.valorTotalAcordo || 0),
+      quantidadeParcelas: Number(data.dividaItau.quantidadeParcelas || data.parcelas?.length || 6),
+      valorParcela: Number(data.dividaItau.valorParcela || 0),
+      observacao: 'Acordo Itaú Click',
+      parcelas: Array.isArray(data.parcelas) ? data.parcelas.map(p => ({
+        ...p,
+        dividaId: 'divida-itau',
+        valor: Number(p.valor || 0)
+      })) : []
+    });
+  }
+
+  data.dividas.forEach(d => {
+    if (!Array.isArray(d.parcelas)) d.parcelas = [];
+  });
+
+  if (data.dividas.length > 0) {
+    const firstDebt = data.dividas[0];
+    data.dividaItau = {
+      banco: firstDebt.banco,
+      valorTotalAcordo: firstDebt.valorTotalAcordo,
+      quantidadeParcelas: firstDebt.quantidadeParcelas || firstDebt.parcelas.length,
+      valorParcela: firstDebt.valorParcela
+    };
+    data.parcelas = firstDebt.parcelas;
+  }
+  return data;
+}
+
 function computeSummary(data) {
+  ensureDividas(data);
   const rendaBase = Number(data.perfil?.rendaLiquida || 0);
   const rendaExtra = Number(data.perfil?.rendaExtraMes || 0);
   const rendaTotalMes = rendaBase + rendaExtra;
 
-  const valorParcela = Number(data.dividaItau?.valorParcela || 0);
+  const dividas = data.dividas || [];
+  let totalParcelasMensal = 0;
+  let totalAmortizadoGeral = 0;
+  let valorTotalAcordoGeral = 0;
+  let totalParcelasCount = 0;
+  let parcelasPagasCountGeral = 0;
+
+  dividas.forEach(d => {
+    const dParcelas = d.parcelas || [];
+    totalParcelasCount += dParcelas.length;
+    const pagas = dParcelas.filter(p => p.paga);
+    parcelasPagasCountGeral += pagas.length;
+    const amortizado = pagas.reduce((acc, p) => acc + Number(p.valor || 0), 0);
+    totalAmortizadoGeral += amortizado;
+    valorTotalAcordoGeral += Number(d.valorTotalAcordo || (dParcelas.reduce((acc, p) => acc + Number(p.valor || 0), 0)));
+
+    const proxNaoPaga = dParcelas.find(p => !p.paga);
+    if (proxNaoPaga) {
+      totalParcelasMensal += Number(proxNaoPaga.valor || d.valorParcela || 0);
+    } else if (dParcelas.length === 0 && d.valorParcela) {
+      totalParcelasMensal += Number(d.valorParcela || 0);
+    }
+  });
+
   const totalFixos = (data.gastosFixos || []).reduce((acc, g) => acc + Number(g.valor || 0), 0);
-  const totalComprometido = valorParcela + totalFixos;
+  const totalComprometido = totalParcelasMensal + totalFixos;
   const saldoLivreBase = rendaTotalMes - totalComprometido;
 
   const totalVariavel = (data.despesasVariaveis || []).reduce((acc, d) => acc + Number(d.valor || 0), 0);
   const saldoLivreAtual = Math.max(0, saldoLivreBase - totalVariavel);
 
-  const parcelas = data.parcelas || [];
-  const parcelasPagas = parcelas.filter(p => p.paga);
-  const totalAmortizado = parcelasPagas.reduce((acc, p) => acc + Number(p.valor || 0), 0);
-  const valorTotalAcordo = Number(data.dividaItau?.valorTotalAcordo || 0);
-  const saldoDevedorRestante = Math.max(0, valorTotalAcordo - totalAmortizado);
-  const percentualQuitado = valorTotalAcordo > 0
-    ? Math.min(100, Math.round((totalAmortizado / valorTotalAcordo) * 100))
+  const saldoDevedorRestante = Math.max(0, valorTotalAcordoGeral - totalAmortizadoGeral);
+  const percentualQuitado = valorTotalAcordoGeral > 0
+    ? Math.min(100, Math.round((totalAmortizadoGeral / valorTotalAcordoGeral) * 100))
     : 0;
 
   const faturasCartoes = data.faturasCartoes || [];
@@ -82,7 +146,7 @@ function computeSummary(data) {
     rendaExtra,
     rendaTotalMes,
     motivoRendaExtra: data.perfil?.motivoRendaExtra || '',
-    valorParcela,
+    valorParcela: totalParcelasMensal,
     totalFixos,
     totalFaturasCartoes,
     totalFaturasPendentes,
@@ -91,14 +155,15 @@ function computeSummary(data) {
     saldoLivreBase,
     totalVariavel,
     saldoLivreAtual,
-    parcelasPagasCount: parcelasPagas.length,
-    totalParcelas: parcelas.length,
-    totalAmortizado,
-    valorTotalAcordo,
+    parcelasPagasCount: parcelasPagasCountGeral,
+    totalParcelas: totalParcelasCount,
+    totalAmortizado: totalAmortizadoGeral,
+    valorTotalAcordo: valorTotalAcordoGeral,
     saldoDevedorRestante,
     percentualQuitado,
     totalMetasAlvo,
-    totalMetasPoupado
+    totalMetasPoupado,
+    dividasCount: dividas.length
   };
 }
 
@@ -270,7 +335,331 @@ router.post('/notify-whatsapp', async (req, res) => {
   }
 });
 
-// POST /api/finance/debt (Cadastrar / Reconfigurar Acordo de Dívida)
+// POST /api/finance/debts (Cadastrar Nova Dívida / Acordo com Parcelas)
+router.post('/debts', async (req, res) => {
+  try {
+    const userEmail = getUserEmail(req);
+    const userRecord = await oracleAtp.getUser(userEmail);
+    if (!userRecord) return res.status(404).json({ success: false, erro: 'Usuário não encontrado.' });
+
+    const data = userRecord.data;
+    ensureDividas(data);
+
+    const { banco, valorTotalAcordo, quantidadeParcelas, valorParcela, primeiroVencimento, observacao, parcelasCustomizadas } = req.body;
+    if (!banco || !String(banco).trim()) {
+      return res.status(400).json({ success: false, erro: 'O nome da dívida/banco é obrigatório.' });
+    }
+
+    const qtd = parseInt(quantidadeParcelas, 10) || (Array.isArray(parcelasCustomizadas) && parcelasCustomizadas.length > 0 ? parcelasCustomizadas.length : 1);
+    const valTotal = parseFloat(valorTotalAcordo) || 0;
+    const valParc = parseFloat(valorParcela) || (qtd > 0 ? (valTotal / qtd) : 0);
+    const primVenc = primeiroVencimento || new Date().toISOString().split('T')[0];
+    const debtId = 'div-' + Date.now();
+
+    let parcelas = [];
+    if (Array.isArray(parcelasCustomizadas) && parcelasCustomizadas.length > 0) {
+      parcelas = parcelasCustomizadas.map((p, idx) => ({
+        id: p.id || `${debtId}-p${idx + 1}`,
+        dividaId: debtId,
+        numero: parseInt(p.numero, 10) || (idx + 1),
+        vencimento: p.vencimento || primVenc,
+        valor: Math.abs(parseFloat(p.valor) || valParc),
+        paga: Boolean(p.paga),
+        dataPagamento: p.paga ? (p.dataPagamento || new Date().toISOString().split('T')[0]) : null,
+        observacao: p.observacao || `${idx + 1}ª parcela de ${banco}`
+      }));
+    } else {
+      const dateObj = new Date(primVenc);
+      for (let i = 1; i <= qtd; i++) {
+        const vDate = new Date(dateObj);
+        vDate.setMonth(vDate.getMonth() + (i - 1));
+        const dateStr = vDate.toISOString().split('T')[0];
+
+        parcelas.push({
+          id: `${debtId}-p${i}`,
+          dividaId: debtId,
+          numero: i,
+          vencimento: dateStr,
+          valor: valParc,
+          paga: false,
+          dataPagamento: null,
+          observacao: observacao || `${i}ª parcela de ${banco}`
+        });
+      }
+    }
+
+    const novaDivida = {
+      id: debtId,
+      banco: String(banco).trim(),
+      valorTotalAcordo: valTotal > 0 ? valTotal : parcelas.reduce((acc, p) => acc + Number(p.valor || 0), 0),
+      quantidadeParcelas: parcelas.length,
+      valorParcela: valParc,
+      observacao: String(observacao || '').trim(),
+      primeiroVencimento: primVenc,
+      dataCriacao: new Date().toISOString(),
+      parcelas
+    };
+
+    data.dividas.push(novaDivida);
+
+    // Meta de quitação correspondente
+    if (!Array.isArray(data.metas)) data.metas = [];
+    data.metas.unshift({
+      id: `meta-${debtId}`,
+      titulo: `Quitar Acordo ${novaDivida.banco}`,
+      categoria: 'Dívida',
+      valorAlvo: novaDivida.valorTotalAcordo,
+      valorAtual: 0,
+      dataAlvo: parcelas[parcelas.length - 1]?.vencimento || '',
+      icone: '💳',
+      descricao: `Quitação total das ${parcelas.length} parcelas do acordo ${novaDivida.banco}.`
+    });
+
+    ensureDividas(data);
+    await oracleAtp.saveUser(userEmail, userRecord.name, userRecord.password, data);
+    const summary = computeSummary(data);
+
+    return res.status(201).json({
+      success: true,
+      mensagem: `Dívida "${novaDivida.banco}" cadastrada com ${parcelas.length} parcelas!`,
+      divida: novaDivida,
+      summary,
+      ...data
+    });
+  } catch (err) {
+    return res.status(500).json({ success: false, erro: err.message });
+  }
+});
+
+// PUT /api/finance/debts/:debtId (Editar dados gerais da dívida)
+router.put('/debts/:debtId', async (req, res) => {
+  try {
+    const userEmail = getUserEmail(req);
+    const userRecord = await oracleAtp.getUser(userEmail);
+    if (!userRecord) return res.status(404).json({ success: false, erro: 'Usuário não encontrado.' });
+
+    const data = userRecord.data;
+    ensureDividas(data);
+
+    const { debtId } = req.params;
+    const { banco, valorTotalAcordo, valorParcela, observacao } = req.body;
+
+    const divida = data.dividas.find(d => String(d.id) === String(debtId));
+    if (!divida) {
+      return res.status(404).json({ success: false, erro: 'Dívida não encontrada.' });
+    }
+
+    if (banco !== undefined) divida.banco = String(banco).trim();
+    if (valorTotalAcordo !== undefined && !isNaN(Number(valorTotalAcordo))) {
+      divida.valorTotalAcordo = Math.abs(parseFloat(valorTotalAcordo));
+    }
+    if (valorParcela !== undefined && !isNaN(Number(valorParcela))) {
+      divida.valorParcela = Math.abs(parseFloat(valorParcela));
+    }
+    if (observacao !== undefined) divida.observacao = String(observacao).trim();
+
+    // Sincroniza meta associada se existir
+    const meta = (data.metas || []).find(m => m.id === `meta-${debtId}` || (debtId === 'divida-itau' && (m.id === 'meta-divida' || m.id === 'meta-1')));
+    if (meta) {
+      meta.titulo = `Quitar Acordo ${divida.banco}`;
+      meta.valorAlvo = divida.valorTotalAcordo;
+    }
+
+    ensureDividas(data);
+    await oracleAtp.saveUser(userEmail, userRecord.name, userRecord.password, data);
+    const summary = computeSummary(data);
+
+    return res.json({
+      success: true,
+      mensagem: `Dívida "${divida.banco}" atualizada com sucesso!`,
+      divida,
+      summary,
+      ...data
+    });
+  } catch (err) {
+    return res.status(500).json({ success: false, erro: err.message });
+  }
+});
+
+// DELETE /api/finance/debts/:debtId (Excluir dívida e parcelas)
+router.delete('/debts/:debtId', async (req, res) => {
+  try {
+    const userEmail = getUserEmail(req);
+    const userRecord = await oracleAtp.getUser(userEmail);
+    if (!userRecord) return res.status(404).json({ success: false, erro: 'Usuário não encontrado.' });
+
+    const data = userRecord.data;
+    ensureDividas(data);
+
+    const { debtId } = req.params;
+    const idx = data.dividas.findIndex(d => String(d.id) === String(debtId));
+    if (idx === -1) {
+      return res.status(404).json({ success: false, erro: 'Dívida não encontrada.' });
+    }
+
+    const removed = data.dividas.splice(idx, 1)[0];
+
+    // Remove meta associada se existir
+    if (Array.isArray(data.metas)) {
+      data.metas = data.metas.filter(m => m.id !== `meta-${debtId}` && !(debtId === 'divida-itau' && (m.id === 'meta-divida' || m.id === 'meta-1')));
+    }
+
+    ensureDividas(data);
+    await oracleAtp.saveUser(userEmail, userRecord.name, userRecord.password, data);
+    const summary = computeSummary(data);
+
+    return res.json({
+      success: true,
+      mensagem: `Dívida "${removed.banco}" removida com sucesso!`,
+      summary,
+      ...data
+    });
+  } catch (err) {
+    return res.status(500).json({ success: false, erro: err.message });
+  }
+});
+
+// PATCH /api/finance/debts/:debtId/installments/:installmentId (Editar parcela individual)
+router.patch('/debts/:debtId/installments/:installmentId', async (req, res) => {
+  try {
+    const userEmail = getUserEmail(req);
+    const userRecord = await oracleAtp.getUser(userEmail);
+    if (!userRecord) return res.status(404).json({ success: false, erro: 'Usuário não encontrado.' });
+
+    const data = userRecord.data;
+    ensureDividas(data);
+
+    const { debtId, installmentId } = req.params;
+    const { valor, vencimento, numero, paga, dataPagamento, observacao } = req.body;
+
+    const divida = data.dividas.find(d => String(d.id) === String(debtId));
+    if (!divida) return res.status(404).json({ success: false, erro: 'Dívida não encontrada.' });
+
+    const parcela = (divida.parcelas || []).find(p => String(p.id) === String(installmentId));
+    if (!parcela) return res.status(404).json({ success: false, erro: 'Parcela não encontrada.' });
+
+    if (valor !== undefined && !isNaN(Number(valor))) {
+      parcela.valor = Math.abs(parseFloat(valor));
+    }
+    if (vencimento !== undefined) parcela.vencimento = String(vencimento).trim();
+    if (numero !== undefined) parcela.numero = parseInt(numero, 10) || parcela.numero;
+    if (paga !== undefined) {
+      parcela.paga = Boolean(paga);
+      parcela.dataPagamento = paga
+        ? (dataPagamento || new Date().toISOString().split('T')[0])
+        : null;
+    }
+    if (observacao !== undefined) parcela.observacao = String(observacao).trim();
+
+    // Atualiza valor amortizado na meta
+    const meta = (data.metas || []).find(m => m.id === `meta-${debtId}` || (debtId === 'divida-itau' && (m.id === 'meta-divida' || m.id === 'meta-1')));
+    if (meta) {
+      const pagas = divida.parcelas.filter(p => p.paga);
+      meta.valorAtual = pagas.reduce((acc, p) => acc + Number(p.valor || 0), 0);
+    }
+
+    ensureDividas(data);
+    await oracleAtp.saveUser(userEmail, userRecord.name, userRecord.password, data);
+    const summary = computeSummary(data);
+
+    return res.json({
+      success: true,
+      mensagem: `Parcela ${parcela.numero} de ${divida.banco} atualizada!`,
+      parcela,
+      divida,
+      summary,
+      ...data
+    });
+  } catch (err) {
+    return res.status(500).json({ success: false, erro: err.message });
+  }
+});
+
+// POST /api/finance/debts/:debtId/installments (Adicionar parcela a uma dívida)
+router.post('/debts/:debtId/installments', async (req, res) => {
+  try {
+    const userEmail = getUserEmail(req);
+    const userRecord = await oracleAtp.getUser(userEmail);
+    if (!userRecord) return res.status(404).json({ success: false, erro: 'Usuário não encontrado.' });
+
+    const data = userRecord.data;
+    ensureDividas(data);
+
+    const { debtId } = req.params;
+    const { valor, vencimento, observacao, numero } = req.body;
+
+    const divida = data.dividas.find(d => String(d.id) === String(debtId));
+    if (!divida) return res.status(404).json({ success: false, erro: 'Dívida não encontrada.' });
+
+    const nextNum = parseInt(numero, 10) || (divida.parcelas.length + 1);
+    const novaParcela = {
+      id: `${debtId}-p${Date.now()}`,
+      dividaId: debtId,
+      numero: nextNum,
+      vencimento: vencimento || new Date().toISOString().split('T')[0],
+      valor: Math.abs(parseFloat(valor) || Number(divida.valorParcela || 0)),
+      paga: false,
+      dataPagamento: null,
+      observacao: observacao || `${nextNum}ª parcela adicional de ${divida.banco}`
+    };
+
+    divida.parcelas.push(novaParcela);
+    divida.quantidadeParcelas = divida.parcelas.length;
+
+    ensureDividas(data);
+    await oracleAtp.saveUser(userEmail, userRecord.name, userRecord.password, data);
+    const summary = computeSummary(data);
+
+    return res.status(201).json({
+      success: true,
+      mensagem: `Parcela adicionada ao acordo ${divida.banco}!`,
+      parcela: novaParcela,
+      divida,
+      summary,
+      ...data
+    });
+  } catch (err) {
+    return res.status(500).json({ success: false, erro: err.message });
+  }
+});
+
+// DELETE /api/finance/debts/:debtId/installments/:installmentId (Remover uma parcela)
+router.delete('/debts/:debtId/installments/:installmentId', async (req, res) => {
+  try {
+    const userEmail = getUserEmail(req);
+    const userRecord = await oracleAtp.getUser(userEmail);
+    if (!userRecord) return res.status(404).json({ success: false, erro: 'Usuário não encontrado.' });
+
+    const data = userRecord.data;
+    ensureDividas(data);
+
+    const { debtId, installmentId } = req.params;
+    const divida = data.dividas.find(d => String(d.id) === String(debtId));
+    if (!divida) return res.status(404).json({ success: false, erro: 'Dívida não encontrada.' });
+
+    const pIdx = (divida.parcelas || []).findIndex(p => String(p.id) === String(installmentId));
+    if (pIdx === -1) return res.status(404).json({ success: false, erro: 'Parcela não encontrada.' });
+
+    const removida = divida.parcelas.splice(pIdx, 1)[0];
+    divida.quantidadeParcelas = divida.parcelas.length;
+
+    ensureDividas(data);
+    await oracleAtp.saveUser(userEmail, userRecord.name, userRecord.password, data);
+    const summary = computeSummary(data);
+
+    return res.json({
+      success: true,
+      mensagem: `Parcela ${removida.numero} removida com sucesso!`,
+      divida,
+      summary,
+      ...data
+    });
+  } catch (err) {
+    return res.status(500).json({ success: false, erro: err.message });
+  }
+});
+
+// POST /api/finance/debt (Legado: cadastrar/atualizar acordo)
 router.post('/debt', async (req, res) => {
   try {
     const userEmail = getUserEmail(req);
@@ -278,67 +667,56 @@ router.post('/debt', async (req, res) => {
     if (!userRecord) return res.status(404).json({ success: false, erro: 'Usuário não encontrado.' });
 
     const data = userRecord.data;
-    const { banco, valorTotalAcordo, quantidadeParcelas, valorParcela, primeiroVencimento, observacao } = req.body;
+    ensureDividas(data);
 
+    const { banco, valorTotalAcordo, quantidadeParcelas, valorParcela, primeiroVencimento, observacao } = req.body;
     const qtd = parseInt(quantidadeParcelas, 10) || 1;
     const valTotal = parseFloat(valorTotalAcordo) || 0;
     const valParc = parseFloat(valorParcela) || (valTotal / qtd);
     const primVenc = primeiroVencimento || new Date().toISOString().split('T')[0];
+    const nomeBanco = String(banco || 'Acordo Cartão/Financiamento').trim();
 
-    data.dividaItau = {
-      banco: String(banco || 'Acordo Cartão/Financiamento').trim(),
-      faturaAgosto: valTotal,
-      entradaAgostoPaga: 0,
-      saldoFinanciadoComIOF: valTotal,
-      taxaJurosMensal: 'Personalizada',
-      taxaJurosAnual: '',
-      jurosTotais: 0,
-      valorTotalAcordo: valTotal,
-      quantidadeParcelas: qtd,
-      valorParcela: valParc
-    };
+    // Se já existe uma dívida do Itaú, atualiza; senão cria nova
+    let dividaAlvo = data.dividas.find(d => d.id === 'divida-itau' || d.banco.toLowerCase().includes('itaú') || d.banco.toLowerCase().includes('itau'));
+    if (!dividaAlvo) {
+      dividaAlvo = {
+        id: 'divida-itau',
+        banco: nomeBanco,
+        valorTotalAcordo: valTotal,
+        quantidadeParcelas: qtd,
+        valorParcela: valParc,
+        observacao: observacao || '',
+        parcelas: []
+      };
+      data.dividas.unshift(dividaAlvo);
+    } else {
+      dividaAlvo.banco = nomeBanco;
+      dividaAlvo.valorTotalAcordo = valTotal;
+      dividaAlvo.quantidadeParcelas = qtd;
+      dividaAlvo.valorParcela = valParc;
+      dividaAlvo.observacao = observacao || dividaAlvo.observacao;
+    }
 
-    // Gera parcelas
+    // Gera parcelas para a dívida
     const parcelas = [];
     const dateObj = new Date(primVenc);
-
     for (let i = 1; i <= qtd; i++) {
       const vDate = new Date(dateObj);
       vDate.setMonth(vDate.getMonth() + (i - 1));
-      const dateStr = vDate.toISOString().split('T')[0];
-
       parcelas.push({
-        id: i,
+        id: `itau-p${i}`,
+        dividaId: dividaAlvo.id,
         numero: i,
-        vencimento: dateStr,
+        vencimento: vDate.toISOString().split('T')[0],
         valor: valParc,
         paga: false,
         dataPagamento: null,
-        observacao: observacao || `${i}ª parcela de ${banco || 'acordo'}`
+        observacao: observacao || `${i}ª parcela de ${nomeBanco}`
       });
     }
+    dividaAlvo.parcelas = parcelas;
 
-    data.parcelas = parcelas;
-
-    // Vincula meta de quitação
-    let metaDivida = (data.metas || []).find(m => m.id === 'meta-divida' || m.id === 'meta-1');
-    if (!metaDivida) {
-      data.metas.unshift({
-        id: 'meta-divida',
-        titulo: `Quitar Acordo ${data.dividaItau.banco}`,
-        categoria: 'Dívida',
-        valorAlvo: valTotal,
-        valorAtual: 0,
-        dataAlvo: parcelas[parcelas.length - 1]?.vencimento || '',
-        icone: '💳',
-        descricao: `Quitação total das ${qtd} parcelas do acordo.`
-      });
-    } else {
-      metaDivida.titulo = `Quitar Acordo ${data.dividaItau.banco}`;
-      metaDivida.valorAlvo = valTotal;
-      metaDivida.valorAtual = 0;
-    }
-
+    ensureDividas(data);
     await oracleAtp.saveUser(userEmail, userRecord.name, userRecord.password, data);
     const summary = computeSummary(data);
 
@@ -353,7 +731,7 @@ router.post('/debt', async (req, res) => {
   }
 });
 
-// PATCH /api/finance/installments/:id
+// PATCH /api/finance/installments/:id (Legado: alterna status ou edita parcela)
 router.patch('/installments/:id', async (req, res) => {
   try {
     const userEmail = getUserEmail(req);
@@ -361,38 +739,53 @@ router.patch('/installments/:id', async (req, res) => {
     if (!userRecord) return res.status(404).json({ success: false, erro: 'Usuário não encontrado.' });
 
     const data = userRecord.data;
-    const { id } = req.params;
-    const { paga, dataPagamento, observacao } = req.body;
+    ensureDividas(data);
 
-    const idx = (data.parcelas || []).findIndex(p => String(p.id) === String(id));
-    if (idx === -1) {
+    const { id } = req.params;
+    const { paga, dataPagamento, observacao, valor, vencimento, numero } = req.body;
+
+    // Busca a parcela em todas as dívidas cadastradas
+    let parcelaEncontrada = null;
+    let dividaMae = null;
+
+    for (const d of data.dividas) {
+      const p = (d.parcelas || []).find(item => String(item.id) === String(id) || String(item.numero) === String(id));
+      if (p) {
+        parcelaEncontrada = p;
+        dividaMae = d;
+        break;
+      }
+    }
+
+    if (!parcelaEncontrada && Array.isArray(data.parcelas)) {
+      parcelaEncontrada = data.parcelas.find(p => String(p.id) === String(id) || String(p.numero) === String(id));
+    }
+
+    if (!parcelaEncontrada) {
       return res.status(404).json({ success: false, erro: 'Parcela não encontrada.' });
     }
 
     if (paga !== undefined) {
-      data.parcelas[idx].paga = Boolean(paga);
-      data.parcelas[idx].dataPagamento = paga
+      parcelaEncontrada.paga = Boolean(paga);
+      parcelaEncontrada.dataPagamento = paga
         ? (dataPagamento || new Date().toISOString().split('T')[0])
         : null;
     }
-    if (observacao !== undefined) {
-      data.parcelas[idx].observacao = observacao;
+    if (valor !== undefined && !isNaN(Number(valor))) {
+      parcelaEncontrada.valor = Math.abs(parseFloat(valor));
     }
+    if (vencimento !== undefined) parcelaEncontrada.vencimento = String(vencimento).trim();
+    if (numero !== undefined) parcelaEncontrada.numero = parseInt(numero, 10) || parcelaEncontrada.numero;
+    if (observacao !== undefined) parcelaEncontrada.observacao = String(observacao).trim();
 
-    // Atualiza valor amortizado na meta de dívida
-    const metaD = (data.metas || []).find(m => m.id === 'meta-divida' || m.id === 'meta-1');
-    if (metaD) {
-      const pagas = data.parcelas.filter(p => p.paga);
-      metaD.valorAtual = pagas.reduce((acc, p) => acc + Number(p.valor || 0), 0);
-    }
-
+    ensureDividas(data);
     await oracleAtp.saveUser(userEmail, userRecord.name, userRecord.password, data);
     const summary = computeSummary(data);
 
     return res.json({
       success: true,
-      mensagem: `Parcela ${data.parcelas[idx].numero} atualizada!`,
-      parcela: data.parcelas[idx],
+      mensagem: `Parcela ${parcelaEncontrada.numero} atualizada!`,
+      parcela: parcelaEncontrada,
       summary,
       ...data
     });

@@ -83,7 +83,7 @@ export default function Dashboard({ onLogout }) {
   const [syncStatus, setSyncStatus] = useState('Oracle ATP');
   const [alerta, setAlerta] = useState('');
 
-  // Formulário: Cadastrar Nova Dívida / Acordo
+  // Formulário & Modais: Dívidas e Acordos Multi-Dívida
   const [mostrarFormDivida, setMostrarFormDivida] = useState(false);
   const [dividaBanco, setDividaBanco] = useState('');
   const [dividaValorTotal, setDividaValorTotal] = useState('');
@@ -94,8 +94,31 @@ export default function Dashboard({ onLogout }) {
     d.setDate(5);
     return d.toISOString().split('T')[0];
   });
-  // Minimizar / Expandir Bloco da Dívida Itaú
-  const [dividaItauMinimizada, setDividaItauMinimizada] = useState(true);
+  const [dividaObs, setDividaObs] = useState('');
+  const [previewParcelas, setPreviewParcelas] = useState([]);
+  const [dividasExpandidas, setDividasExpandidas] = useState({ 'divida-itau': true });
+
+  // Modal Editar Dívida
+  const [modalEditarDivida, setModalEditarDivida] = useState({ aberta: false, divida: null });
+  const [editDividaBanco, setEditDividaBanco] = useState('');
+  const [editDividaValorTotal, setEditDividaValorTotal] = useState('');
+  const [editDividaValorParcela, setEditDividaValorParcela] = useState('');
+  const [editDividaObs, setEditDividaObs] = useState('');
+
+  // Modal Editar Parcela Individual
+  const [modalEditarParcela, setModalEditarParcela] = useState({ aberta: false, parcela: null, debtId: null, banco: '' });
+  const [editParcelaNumero, setEditParcelaNumero] = useState(1);
+  const [editParcelaValor, setEditParcelaValor] = useState('');
+  const [editParcelaVencimento, setEditParcelaVencimento] = useState('');
+  const [editParcelaObs, setEditParcelaObs] = useState('');
+  const [editParcelaPaga, setEditParcelaPaga] = useState(false);
+
+  // Modal Adicionar Parcela Avulsa
+  const [modalAddParcela, setModalAddParcela] = useState({ aberta: false, debtId: null, banco: '' });
+  const [addParcelaNumero, setAddParcelaNumero] = useState(1);
+  const [addParcelaValor, setAddParcelaValor] = useState('');
+  const [addParcelaVencimento, setAddParcelaVencimento] = useState('');
+  const [addParcelaObs, setAddParcelaObs] = useState('');
 
   // Faturas de Cartão & Contas Variáveis (PicPay, etc.)
   const [mostrarFormFatura, setMostrarFormFatura] = useState(false);
@@ -748,6 +771,45 @@ export default function Dashboard({ onLogout }) {
   const rendaTotalMes = Number(data.perfil?.rendaLiquida || 0) + Number(data.perfil?.rendaExtraMes || 0);
   const saldoLivreReal = Math.max(0, rendaTotalMes - summary.totalComprometido - summary.totalVariavel);
 
+  const listaDividas = useMemo(() => {
+    let divs = Array.isArray(data.dividas) ? [...data.dividas] : [];
+    if (divs.length === 0 && data.dividaItau && (Number(data.dividaItau.valorTotalAcordo) > 0 || Number(data.dividaItau.valorParcela) > 0)) {
+      divs.push({
+        id: 'divida-itau',
+        banco: data.dividaItau.banco || 'Itaú Click',
+        valorTotalAcordo: Number(data.dividaItau.valorTotalAcordo || 0),
+        valorParcela: Number(data.dividaItau.valorParcela || 0),
+        quantidadeParcelas: Number(data.dividaItau.quantidadeParcelas || data.parcelas?.length || 6),
+        observacao: 'Acordo Itaú Click 6x',
+        parcelas: Array.isArray(data.parcelas) ? data.parcelas : []
+      });
+    }
+    return divs;
+  }, [data.dividas, data.dividaItau, data.parcelas]);
+
+  const temDividas = listaDividas.length > 0;
+
+  const gerarPreviewParcelas = (valTotStr, qtdStr, vencStr, bancoStr) => {
+    const valTotal = parseFloat(String(valTotStr).replace(',', '.')) || 0;
+    const qtd = Math.max(1, parseInt(qtdStr, 10) || 1);
+    const primVenc = vencStr || new Date().toISOString().split('T')[0];
+    const valParc = qtd > 0 ? (valTotal / qtd) : 0;
+    const dateObj = new Date(primVenc);
+
+    const lista = [];
+    for (let i = 1; i <= qtd; i++) {
+      const vDate = new Date(dateObj);
+      vDate.setMonth(vDate.getMonth() + (i - 1));
+      lista.push({
+        numero: i,
+        vencimento: vDate.toISOString().split('T')[0],
+        valor: Number(valParc.toFixed(2)),
+        observacao: `${i}ª parcela de ${bancoStr || 'acordo'}`
+      });
+    }
+    setPreviewParcelas(lista);
+  };
+
   const mostrarMensagem = (msg) => {
     setAlerta(msg);
     setTimeout(() => setAlerta(''), 3500);
@@ -801,88 +863,382 @@ export default function Dashboard({ onLogout }) {
     }
   };
 
-  // Cadastrar / Reconfigurar Acordo de Dívida
-  const handleSalvarDivida = async (e) => {
-    e.preventDefault();
-    if (!dividaValorTotal) return;
+  // Alternar Status de Parcela (Paga / Pendente)
+  const toggleParcela = async (parcela, debtId) => {
+    const novoStatus = !parcela.paga;
+    const dataPag = novoStatus ? new Date().toISOString().split('T')[0] : null;
 
-    const valTotal = parseFloat(dividaValorTotal.replace(',', '.'));
-    const qtd = parseInt(dividaParcelasQtd, 10) || 1;
-    const valParc = dividaValorParcela ? parseFloat(dividaValorParcela.replace(',', '.')) : (valTotal / qtd);
+    // Atualização otimista local
+    const novoData = {
+      ...data,
+      dividas: listaDividas.map(d => {
+        if (debtId && d.id !== debtId) return d;
+        if (!debtId && !d.parcelas?.some(p => p.id === parcela.id)) return d;
+        return {
+          ...d,
+          parcelas: (d.parcelas || []).map(p =>
+            p.id === parcela.id ? { ...p, paga: novoStatus, dataPagamento: dataPag } : p
+          )
+        };
+      }),
+      parcelas: (data.parcelas || []).map(p =>
+        p.id === parcela.id ? { ...p, paga: novoStatus, dataPagamento: dataPag } : p
+      )
+    };
+
+    setData(novoData);
+    localStorage.setItem('finance_cached_data', JSON.stringify(novoData));
+
+    try {
+      if (debtId) {
+        await api.patch(`/api/finance/debts/${debtId}/installments/${parcela.id}`, { paga: novoStatus, dataPagamento: dataPag });
+      } else {
+        await api.patch(`/api/finance/installments/${parcela.id}`, { paga: novoStatus, dataPagamento: dataPag });
+      }
+      setSyncStatus('Salvo no Oracle ATP');
+    } catch (e) {
+      setSyncStatus('Salvo local');
+    }
+  };
+
+  // Abrir Modal de Edição de Parcela
+  const abrirModalEditarParcela = (parcela, debtId, nomeBanco) => {
+    setModalEditarParcela({
+      aberta: true,
+      parcela,
+      debtId,
+      banco: nomeBanco
+    });
+    setEditParcelaNumero(parcela.numero || 1);
+    setEditParcelaValor(String(parcela.valor || ''));
+    setEditParcelaVencimento(parcela.vencimento || '');
+    setEditParcelaObs(parcela.observacao || '');
+    setEditParcelaPaga(Boolean(parcela.paga));
+  };
+
+  // Salvar Edição de Parcela Individual
+  const handleSalvarEdicaoParcela = async (e) => {
+    e.preventDefault();
+    const { parcela, debtId } = modalEditarParcela;
+    if (!parcela) return;
+
+    const valNum = parseFloat(String(editParcelaValor).replace(',', '.'));
+    if (isNaN(valNum) || valNum <= 0) {
+      mostrarMensagem('Informe um valor válido para a parcela.');
+      return;
+    }
+
+    const payload = {
+      valor: valNum,
+      vencimento: editParcelaVencimento,
+      numero: parseInt(editParcelaNumero, 10) || parcela.numero,
+      observacao: editParcelaObs.trim(),
+      paga: editParcelaPaga,
+      dataPagamento: editParcelaPaga ? (parcela.dataPagamento || new Date().toISOString().split('T')[0]) : null
+    };
+
+    const novoData = {
+      ...data,
+      dividas: listaDividas.map(d => {
+        if (debtId && d.id !== debtId) return d;
+        if (!debtId && !d.parcelas?.some(p => p.id === parcela.id)) return d;
+        return {
+          ...d,
+          parcelas: (d.parcelas || []).map(p =>
+            p.id === parcela.id ? { ...p, ...payload } : p
+          )
+        };
+      }),
+      parcelas: (data.parcelas || []).map(p =>
+        p.id === parcela.id ? { ...p, ...payload } : p
+      )
+    };
+
+    setData(novoData);
+    localStorage.setItem('finance_cached_data', JSON.stringify(novoData));
+    setModalEditarParcela({ aberta: false, parcela: null, debtId: null, banco: '' });
+
+    try {
+      const res = await api.patch(`/api/finance/debts/${debtId}/installments/${parcela.id}`, payload);
+      if (res.data?.success) {
+        setData(res.data);
+        localStorage.setItem('finance_cached_data', JSON.stringify(res.data));
+      }
+      mostrarMensagem('Parcela atualizada com sucesso!');
+    } catch (err) {
+      mostrarMensagem('Parcela salva localmente!');
+    }
+  };
+
+  // Excluir Parcela Individual
+  const handleExcluirParcela = async (parcelaId, debtId) => {
+    if (!window.confirm('Tem certeza que deseja excluir esta parcela?')) return;
+
+    const novoData = {
+      ...data,
+      dividas: listaDividas.map(d => {
+        if (d.id !== debtId) return d;
+        const filtradas = (d.parcelas || []).filter(p => p.id !== parcelaId);
+        return { ...d, parcelas: filtradas, quantidadeParcelas: filtradas.length };
+      }),
+      parcelas: (data.parcelas || []).filter(p => p.id !== parcelaId)
+    };
+
+    setData(novoData);
+    localStorage.setItem('finance_cached_data', JSON.stringify(novoData));
+
+    try {
+      const res = await api.delete(`/api/finance/debts/${debtId}/installments/${parcelaId}`);
+      if (res.data?.success) {
+        setData(res.data);
+        localStorage.setItem('finance_cached_data', JSON.stringify(res.data));
+      }
+      mostrarMensagem('Parcela removida com sucesso!');
+    } catch (err) {
+      mostrarMensagem('Parcela removida localmente.');
+    }
+  };
+
+  // Abrir Modal Adicionar Parcela Avulsa
+  const abrirModalAddParcela = (divida) => {
+    setModalAddParcela({
+      aberta: true,
+      debtId: divida.id,
+      banco: divida.banco
+    });
+    setAddParcelaNumero((divida.parcelas?.length || 0) + 1);
+    setAddParcelaValor(String(divida.valorParcela || ''));
+    setAddParcelaVencimento(new Date().toISOString().split('T')[0]);
+    setAddParcelaObs('');
+  };
+
+  // Salvar Nova Parcela Avulsa
+  const handleSalvarNovaParcelaAvulsa = async (e) => {
+    e.preventDefault();
+    const { debtId } = modalAddParcela;
+    if (!debtId) return;
+
+    const valNum = parseFloat(String(addParcelaValor).replace(',', '.'));
+    if (isNaN(valNum) || valNum <= 0) {
+      mostrarMensagem('Informe um valor válido para a parcela.');
+      return;
+    }
+
+    const payload = {
+      numero: parseInt(addParcelaNumero, 10) || 1,
+      valor: valNum,
+      vencimento: addParcelaVencimento,
+      observacao: addParcelaObs.trim()
+    };
+
+    try {
+      const res = await api.post(`/api/finance/debts/${debtId}/installments`, payload);
+      if (res.data?.success) {
+        setData(res.data);
+        localStorage.setItem('finance_cached_data', JSON.stringify(res.data));
+        setModalAddParcela({ aberta: false, debtId: null, banco: '' });
+        mostrarMensagem('Nova parcela adicionada ao acordo!');
+        return;
+      }
+    } catch (err) {}
+
+    // Fallback local
+    const novaParc = {
+      id: `${debtId}-p${Date.now()}`,
+      dividaId: debtId,
+      numero: payload.numero,
+      valor: payload.valor,
+      vencimento: payload.vencimento,
+      observacao: payload.observacao,
+      paga: false,
+      dataPagamento: null
+    };
+
+    const novoData = {
+      ...data,
+      dividas: listaDividas.map(d => d.id === debtId ? { ...d, parcelas: [...(d.parcelas || []), novaParc], quantidadeParcelas: (d.parcelas?.length || 0) + 1 } : d)
+    };
+    setData(novoData);
+    localStorage.setItem('finance_cached_data', JSON.stringify(novoData));
+    setModalAddParcela({ aberta: false, debtId: null, banco: '' });
+    mostrarMensagem('Parcela adicionada localmente!');
+  };
+
+  // Abrir Modal Editar Dívida
+  const abrirModalEditarDivida = (divida) => {
+    setModalEditarDivida({
+      aberta: true,
+      divida
+    });
+    setEditDividaBanco(divida.banco || '');
+    setEditDividaValorTotal(String(divida.valorTotalAcordo || ''));
+    setEditDividaValorParcela(String(divida.valorParcela || ''));
+    setEditDividaObs(divida.observacao || '');
+  };
+
+  // Salvar Edição de Dívida
+  const handleSalvarEdicaoDivida = async (e) => {
+    e.preventDefault();
+    const { divida } = modalEditarDivida;
+    if (!divida) return;
+
+    const valTot = parseFloat(String(editDividaValorTotal).replace(',', '.')) || 0;
+    const valParc = parseFloat(String(editDividaValorParcela).replace(',', '.')) || (divida.parcelas?.length ? valTot / divida.parcelas.length : 0);
+
+    const payload = {
+      banco: editDividaBanco.trim(),
+      valorTotalAcordo: valTot,
+      valorParcela: valParc,
+      observacao: editDividaObs.trim()
+    };
+
+    try {
+      const res = await api.put(`/api/finance/debts/${divida.id}`, payload);
+      if (res.data?.success) {
+        setData(res.data);
+        localStorage.setItem('finance_cached_data', JSON.stringify(res.data));
+        setModalEditarDivida({ aberta: false, divida: null });
+        mostrarMensagem('Acordo de dívida atualizado com sucesso!');
+        return;
+      }
+    } catch (err) {}
+
+    // Fallback local
+    const novoData = {
+      ...data,
+      dividas: listaDividas.map(d => d.id === divida.id ? { ...d, ...payload } : d)
+    };
+    setData(novoData);
+    localStorage.setItem('finance_cached_data', JSON.stringify(novoData));
+    setModalEditarDivida({ aberta: false, divida: null });
+    mostrarMensagem('Acordo atualizado localmente!');
+  };
+
+  // Excluir Dívida Completa
+  const handleExcluirDivida = async (debtId, nomeBanco) => {
+    if (!window.confirm(`Tem certeza que deseja excluir o acordo "${nomeBanco}" e todas as suas parcelas?`)) return;
+
+    try {
+      const res = await api.delete(`/api/finance/debts/${debtId}`);
+      if (res.data?.success) {
+        setData(res.data);
+        localStorage.setItem('finance_cached_data', JSON.stringify(res.data));
+        mostrarMensagem(`Dívida "${nomeBanco}" removida com sucesso!`);
+        return;
+      }
+    } catch (err) {}
+
+    // Fallback local
+    const novoData = {
+      ...data,
+      dividas: listaDividas.filter(d => d.id !== debtId),
+      dividaItau: debtId === 'divida-itau' ? null : data.dividaItau
+    };
+    setData(novoData);
+    localStorage.setItem('finance_cached_data', JSON.stringify(novoData));
+    mostrarMensagem(`Dívida "${nomeBanco}" removida localmente.`);
+  };
+
+  // Cadastrar Nova Dívida (Multi-Dívidas)
+  const handleSalvarNovaDivida = async (e) => {
+    e.preventDefault();
+    if (!dividaBanco.trim() || !dividaValorTotal) {
+      mostrarMensagem('Preencha o nome do banco e o valor total.');
+      return;
+    }
+
+    const valTotal = parseFloat(String(dividaValorTotal).replace(',', '.'));
+    const qtd = parseInt(dividaParcelasQtd, 10) || (previewParcelas.length > 0 ? previewParcelas.length : 1);
+    const valParc = dividaValorParcela ? parseFloat(String(dividaValorParcela).replace(',', '.')) : (valTotal / qtd);
 
     const payload = {
       banco: dividaBanco.trim(),
       valorTotalAcordo: valTotal,
       quantidadeParcelas: qtd,
       valorParcela: valParc,
-      primeiroVencimento: dividaVencimento
+      primeiroVencimento: dividaVencimento,
+      observacao: dividaObs.trim(),
+      parcelasCustomizadas: previewParcelas.length > 0 ? previewParcelas : null
     };
 
     try {
-      const res = await api.post('/api/finance/debt', payload);
+      const res = await api.post('/api/finance/debts', payload);
       if (res.data?.success) {
         setData(res.data);
         localStorage.setItem('finance_cached_data', JSON.stringify(res.data));
         setMostrarFormDivida(false);
-        mostrarMensagem('Acordo e parcelas cadastrados no Oracle Cloud!');
+        setDividaBanco('');
+        setDividaValorTotal('');
+        setDividaParcelasQtd('6');
+        setDividaValorParcela('');
+        setDividaObs('');
+        setPreviewParcelas([]);
+        mostrarMensagem(`Nova dívida "${payload.banco}" cadastrada no Oracle Cloud!`);
         return;
       }
     } catch (err) {}
 
     // Fallback local
-    const parcelas = [];
-    const dateObj = new Date(dividaVencimento);
-    for (let i = 1; i <= qtd; i++) {
-      const vDate = new Date(dateObj);
-      vDate.setMonth(vDate.getMonth() + (i - 1));
-      parcelas.push({
-        id: i,
-        numero: i,
-        vencimento: vDate.toISOString().split('T')[0],
-        valor: valParc,
+    const debtId = 'div-' + Date.now();
+    let parcelasGeradas = [];
+    if (previewParcelas.length > 0) {
+      parcelasGeradas = previewParcelas.map((p, idx) => ({
+        id: `${debtId}-p${idx + 1}`,
+        dividaId: debtId,
+        numero: p.numero || (idx + 1),
+        vencimento: p.vencimento,
+        valor: p.valor,
         paga: false,
         dataPagamento: null,
-        observacao: `${i}ª parcela de ${dividaBanco}`
-      });
+        observacao: p.observacao || `${idx + 1}ª parcela de ${dividaBanco}`
+      }));
+    } else {
+      const dateObj = new Date(dividaVencimento);
+      for (let i = 1; i <= qtd; i++) {
+        const vDate = new Date(dateObj);
+        vDate.setMonth(vDate.getMonth() + (i - 1));
+        parcelasGeradas.push({
+          id: `${debtId}-p${i}`,
+          dividaId: debtId,
+          numero: i,
+          vencimento: vDate.toISOString().split('T')[0],
+          valor: valParc,
+          paga: false,
+          dataPagamento: null,
+          observacao: `${i}ª parcela de ${dividaBanco}`
+        });
+      }
     }
+
+    const novaDividaObj = {
+      id: debtId,
+      banco: dividaBanco.trim(),
+      valorTotalAcordo: valTotal,
+      quantidadeParcelas: parcelasGeradas.length,
+      valorParcela: valParc,
+      observacao: dividaObs.trim(),
+      primeiroVencimento: dividaVencimento,
+      parcelas: parcelasGeradas
+    };
 
     const novoData = {
       ...data,
-      dividaItau: {
-        banco: dividaBanco.trim(),
-        valorTotalAcordo: valTotal,
-        quantidadeParcelas: qtd,
-        valorParcela: valParc
-      },
-      parcelas
+      dividas: [...listaDividas, novaDividaObj]
     };
     setData(novoData);
     localStorage.setItem('finance_cached_data', JSON.stringify(novoData));
     setMostrarFormDivida(false);
-    mostrarMensagem('Acordo de dívida salvo localmente!');
+    setDividaBanco('');
+    setDividaValorTotal('');
+    setDividaParcelasQtd('6');
+    setDividaValorParcela('');
+    setDividaObs('');
+    setPreviewParcelas([]);
+    mostrarMensagem(`Dívida "${payload.banco}" salva localmente!`);
   };
 
-  // Alternar parcela
-  const toggleParcela = async (parcela) => {
-    const novoStatus = !parcela.paga;
-    const dataPag = novoStatus ? new Date().toISOString().split('T')[0] : null;
-
-    const novoData = {
-      ...data,
-      parcelas: data.parcelas.map(p =>
-        p.id === parcela.id ? { ...p, paga: novoStatus, dataPagamento: dataPag } : p
-      )
-    };
-    setData(novoData);
-    localStorage.setItem('finance_cached_data', JSON.stringify(novoData));
-
-    try {
-      await api.patch(`/api/finance/installments/${parcela.id}`, { paga: novoStatus, dataPagamento: dataPag });
-      setSyncStatus('Salvo no Oracle ATP');
-    } catch (e) {
-      setSyncStatus('Salvo local');
-    }
-  };
+  // Alias para retrocompatibilidade
+  const handleSalvarDivida = handleSalvarNovaDivida;
 
   // Adicionar gasto do dia a dia
   const handleAdicionarGasto = async (e) => {
@@ -1234,8 +1590,6 @@ export default function Dashboard({ onLogout }) {
     if (filtroCategoria === 'Todas') return true;
     return t.categoria === filtroCategoria;
   });
-
-  const temDividas = summary.valorTotalAcordo > 0 && (data.parcelas || []).length > 0;
 
   // Cálculos para Gráfico Donut de Distribuição Financeira
   const totalDividasMes = Number(summary.valorParcela || 0) + Number(summary.totalFaturasCartoes || 0);
@@ -1870,226 +2224,256 @@ export default function Dashboard({ onLogout }) {
               </section>
             )}
 
-            {/* SE O USUÁRIO TEM DÍVIDAS CADASTRADAS */}
-            {temDividas ? (
-              <section className="card">
-                <div 
-                  className="card-header" 
-                  onClick={() => setDividaItauMinimizada(!dividaItauMinimizada)}
-                  style={{ cursor: 'pointer' }}
-                >
-                  <div>
-                    <div className="card-title">
-                      <span>💳</span> {data.dividaItau?.banco || 'Acordo de Dívida'} ({data.parcelas?.length}x de {formatBRL(summary.valorParcela)})
-                    </div>
-                    <div className="card-subtitle">
-                      Total da Dívida: {formatBRL(summary.valorTotalAcordo)} • Resta {formatBRL(summary.saldoDevedorRestante)}
-                    </div>
-                  </div>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
-                    <span className="badge-tag">
-                      {summary.parcelasPagasCount} de {summary.totalParcelas} Pagas
-                    </span>
-                    <button
-                      type="button"
-                      className="btn-icon"
-                      style={{ fontSize: '0.8rem', width: '28px', height: '28px', background: 'rgba(255,255,255,0.06)' }}
-                      title={dividaItauMinimizada ? 'Expandir Parcelas' : 'Minimizar Parcelas'}
-                    >
-                      {dividaItauMinimizada ? '▼' : '▲'}
-                    </button>
-                  </div>
+            {/* SEÇÃO: DÍVIDAS & ACORDOS PARCELADOS (MULTI-DÍVIDAS) */}
+            <div style={{ marginBottom: '1.25rem' }}>
+              <div style={{ 
+                display: 'flex', 
+                alignItems: 'center', 
+                justifyContent: 'space-between', 
+                marginBottom: '0.75rem',
+                flexWrap: 'wrap',
+                gap: '0.5rem'
+              }}>
+                <div>
+                  <h3 style={{ fontSize: '1.05rem', fontWeight: 800, color: '#f8fafc', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                    <span>💳</span> Central de Dívidas & Acordos ({listaDividas.length})
+                  </h3>
+                  <p style={{ fontSize: '0.75rem', color: '#94a3b8' }}>
+                    {temDividas ? `Comprometido: ${formatBRL(summary.valorParcela)}/mês • Resta quitar: ${formatBRL(summary.saldoDevedorRestante)}` : 'Cadastre parcelamentos para gerenciar e liquidar'}
+                  </p>
                 </div>
-
-                <div className="debt-progress-box">
-                  <div className="debt-progress-bar">
-                    <div className="debt-progress-fill" style={{ width: `${summary.percentualQuitado}%` }} />
-                  </div>
-                  <div className="debt-progress-labels">
-                    <span>Quitado: {formatBRL(summary.totalAmortizado)} ({summary.percentualQuitado}%)</span>
-                    <span>Resta: {formatBRL(summary.saldoDevedorRestante)}</span>
-                  </div>
-                </div>
-
-                {/* Conteúdo minimizado ou expandido */}
-                {dividaItauMinimizada ? (
-                  <div style={{ 
-                    padding: '0.75rem', 
-                    background: 'rgba(255,255,255,0.02)', 
-                    borderRadius: '10px', 
-                    display: 'flex', 
-                    justifyContent: 'space-between', 
-                    alignItems: 'center',
-                    marginTop: '0.5rem',
-                    border: '1px solid rgba(255,255,255,0.05)'
-                  }}>
-                    <span style={{ fontSize: '0.78rem', color: '#94a3b8' }}>
-                      ⏳ Próxima: <strong>{data.parcelas?.find(p => !p.paga)?.numero || 2}ª Parcela</strong> ({formatDate(data.parcelas?.find(p => !p.paga)?.vencimento)})
-                    </span>
-                    <button 
-                      onClick={() => setDividaItauMinimizada(false)}
-                      className="btn-secondary"
-                      style={{ fontSize: '0.72rem', padding: '0.35rem 0.65rem', color: '#38bdf8', borderColor: 'rgba(56,189,248,0.3)' }}
-                    >
-                      👁️ Ver 6 Parcelas ▼
-                    </button>
-                  </div>
-                ) : (
-                  <>
-                    <div className="installments-list">
-                      {(data.parcelas || []).map((parc) => (
-                        <div key={parc.id} className={`installment-item ${parc.paga ? 'is-paid' : ''}`}>
-                          <div className="installment-left">
-                            <div className="installment-num">{parc.paga ? '✓' : parc.numero}</div>
-                            <div className="installment-details">
-                              <h4>{parc.numero}ª Parcela • {formatDate(parc.vencimento)}</h4>
-                              <p>{parc.paga ? `Pago em ${formatDate(parc.dataPagamento || parc.vencimento)}` : 'Vencimento dia 05'}</p>
-                              {parc.observacao && <div className="installment-note">💡 {parc.observacao}</div>}
-                            </div>
-                          </div>
-                          <div className="installment-right">
-                            <div className="installment-val">{formatBRL(parc.valor)}</div>
-                            <button
-                              onClick={(e) => { e.stopPropagation(); toggleParcela(parc); }}
-                              className={`btn-toggle-paid ${parc.paga ? 'paid' : 'pending'}`}
-                            >
-                              {parc.paga ? 'Paga ✓' : 'Marcar Paga'}
-                            </button>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-
-                    <div style={{ marginTop: '0.75rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                      <button
-                        onClick={() => setDividaItauMinimizada(true)}
-                        className="btn-secondary"
-                        style={{ fontSize: '0.72rem' }}
-                      >
-                        ▲ Recolher Parcelas
-                      </button>
-                      <button
-                        onClick={() => {
-                          if (data.dividaItau) {
-                            setDividaBanco(data.dividaItau.banco || '');
-                            setDividaValorTotal(String(data.dividaItau.valorTotalAcordo || ''));
-                            setDividaParcelasQtd(String(data.dividaItau.quantidadeParcelas || data.parcelas?.length || '6'));
-                            setDividaValorParcela(String(data.dividaItau.valorParcela || ''));
-                          }
-                          setMostrarFormDivida(!mostrarFormDivida);
-                        }}
-                        className="btn-secondary"
-                        style={{ fontSize: '0.72rem' }}
-                      >
-                        ✏️ Reconfigurar Acordo
-                      </button>
-                    </div>
-                  </>
-                )}
-              </section>
-            ) : (
-              /* SE O USUÁRIO NÃO TEM DÍVIDAS CADASTRADAS (NOVO USUÁRIO) */
-              <section className="card" style={{ textAlign: 'center', padding: '1.75rem 1.25rem' }}>
-                <div style={{ fontSize: '2.5rem', marginBottom: '0.5rem' }}>🎉</div>
-                <h3 style={{ fontSize: '1.05rem', fontWeight: 700, color: '#fff', marginBottom: '0.35rem' }}>
-                  Nenhuma dívida cadastrada!
-                </h3>
-                <p style={{ fontSize: '0.8rem', color: '#94a3b8', lineHeight: 1.5, marginBottom: '1rem', maxWidth: '340px', margin: '0 auto 1rem auto' }}>
-                  Se você possui algum acordo de cartão, empréstimo ou parcelamento que quer liquidar, cadastre abaixo para gerenciar mês a mês.
-                </p>
                 <button
+                  type="button"
                   onClick={() => {
                     setDividaBanco('');
                     setDividaValorTotal('');
                     setDividaParcelasQtd('6');
                     setDividaValorParcela('');
-                    setMostrarFormDivida(!mostrarFormDivida);
+                    setDividaObs('');
+                    gerarPreviewParcelas('', '6', dividaVencimento, '');
+                    setMostrarFormDivida(true);
                   }}
                   className="btn-primary"
-                  style={{ margin: '0 auto' }}
+                  style={{ fontSize: '0.78rem', padding: '0.45rem 0.85rem', display: 'inline-flex', alignItems: 'center', gap: '0.35rem' }}
                 >
-                  + Cadastrar Minha Dívida / Acordo
+                  <span>➕</span> Nova Dívida / Acordo
                 </button>
-              </section>
-            )}
+              </div>
 
-            {/* FORMULÁRIO PARA CADASTRAR OU RECONFIGURAR DÍVIDA */}
-            {mostrarFormDivida && (
-              <section className="card" style={{ borderColor: 'rgba(59,130,246,0.4)', background: '#131d31' }}>
-                <div className="card-header">
-                  <div className="card-title">
-                    <span>📝</span> Cadastrar Acordo de Dívida / Cartão
-                  </div>
-                  <button onClick={() => setMostrarFormDivida(false)} className="btn-del">✕</button>
-                </div>
+              {temDividas ? (
+                listaDividas.map((divida) => {
+                  const parcs = divida.parcelas || [];
+                  const pagas = parcs.filter(p => p.paga);
+                  const totalAmort = pagas.reduce((acc, p) => acc + Number(p.valor || 0), 0);
+                  const valTot = Number(divida.valorTotalAcordo || parcs.reduce((acc, p) => acc + Number(p.valor || 0), 0));
+                  const saldoRest = Math.max(0, valTot - totalAmort);
+                  const perc = valTot > 0 ? Math.min(100, Math.round((totalAmort / valTot) * 100)) : 0;
+                  const isExpandida = dividasExpandidas[divida.id] !== false;
+                  const proxParcela = parcs.find(p => !p.paga);
 
-                <form onSubmit={handleSalvarDivida} className="quick-add-box">
-                  <div className="form-group">
-                    <label style={{ fontSize: '0.75rem', color: '#94a3b8' }}>Nome da Dívida / Banco</label>
-                    <input
-                      type="text"
-                      className="input-field"
-                      placeholder="Ex: Nubank, Cartão Itaú, Financiamento"
-                      value={dividaBanco}
-                      onChange={(e) => setDividaBanco(e.target.value)}
-                      required
-                    />
-                  </div>
+                  return (
+                    <section key={divida.id} className="debt-card">
+                      {/* Linha de Cabeçalho do Card */}
+                      <div className="debt-header-row">
+                        <div 
+                          className="debt-header-info" 
+                          onClick={() => setDividasExpandidas(prev => ({ ...prev, [divida.id]: !isExpandida }))}
+                          style={{ cursor: 'pointer' }}
+                        >
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '0.45rem', flexWrap: 'wrap' }}>
+                            <span style={{ fontSize: '1.1rem' }}>💳</span>
+                            <strong style={{ fontSize: '0.98rem', color: '#f8fafc', fontWeight: 700 }}>
+                              {divida.banco}
+                            </strong>
+                            <span className="badge-tag" style={{ fontSize: '0.68rem', padding: '0.15rem 0.45rem' }}>
+                              {pagas.length} de {parcs.length} Pagas
+                            </span>
+                          </div>
+                          <div style={{ fontSize: '0.75rem', color: '#94a3b8', marginTop: '0.2rem' }}>
+                            Acordo: {formatBRL(valTot)} • Resta: {formatBRL(saldoRest)} {divida.valorParcela ? `• ~${formatBRL(divida.valorParcela)}/mês` : ''}
+                          </div>
+                          {divida.observacao && (
+                            <div style={{ fontSize: '0.7rem', color: '#cbd5e1', marginTop: '0.15rem' }}>
+                              💡 {divida.observacao}
+                            </div>
+                          )}
+                        </div>
 
-                  <div className="input-row">
-                    <div>
-                      <label style={{ fontSize: '0.75rem', color: '#94a3b8' }}>Valor Total (R$)</label>
-                      <input
-                        type="text"
-                        className="input-field"
-                        placeholder="Ex: 5000.00"
-                        value={dividaValorTotal}
-                        onChange={(e) => setDividaValorTotal(e.target.value)}
-                        required
-                      />
-                    </div>
-                    <div>
-                      <label style={{ fontSize: '0.75rem', color: '#94a3b8' }}>Nº de Parcelas</label>
-                      <input
-                        type="number"
-                        className="input-field"
-                        placeholder="Ex: 6"
-                        value={dividaParcelasQtd}
-                        onChange={(e) => setDividaParcelasQtd(e.target.value)}
-                        required
-                      />
-                    </div>
-                  </div>
+                        {/* Botões de Ação do Card */}
+                        <div className="debt-header-actions">
+                          <button
+                            type="button"
+                            onClick={(e) => { e.stopPropagation(); abrirModalAddParcela(divida); }}
+                            className="btn-action-sm"
+                            title="Adicionar Parcela Avulsa"
+                          >
+                            ➕
+                          </button>
+                          <button
+                            type="button"
+                            onClick={(e) => { e.stopPropagation(); abrirModalEditarDivida(divida); }}
+                            className="btn-action-sm"
+                            title="Editar Acordo / Dívida"
+                          >
+                            ✏️
+                          </button>
+                          <button
+                            type="button"
+                            onClick={(e) => { e.stopPropagation(); handleExcluirDivida(divida.id, divida.banco); }}
+                            className="btn-action-sm danger"
+                            title="Excluir Dívida"
+                          >
+                            🗑️
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setDividasExpandidas(prev => ({ ...prev, [divida.id]: !isExpandida }))}
+                            className="btn-action-sm"
+                            title={isExpandida ? 'Recolher' : 'Expandir'}
+                          >
+                            {isExpandida ? '▲' : '▼'}
+                          </button>
+                        </div>
+                      </div>
 
-                  <div className="input-row">
-                    <div>
-                      <label style={{ fontSize: '0.75rem', color: '#94a3b8' }}>Valor da Parcela (R$)</label>
-                      <input
-                        type="text"
-                        className="input-field"
-                        placeholder="Ex: 833.33 (ou automático)"
-                        value={dividaValorParcela}
-                        onChange={(e) => setDividaValorParcela(e.target.value)}
-                      />
-                    </div>
-                    <div>
-                      <label style={{ fontSize: '0.75rem', color: '#94a3b8' }}>1º Vencimento</label>
-                      <input
-                        type="date"
-                        className="input-field"
-                        value={dividaVencimento}
-                        onChange={(e) => setDividaVencimento(e.target.value)}
-                        required
-                      />
-                    </div>
-                  </div>
+                      {/* Barra de Progresso de Quitação */}
+                      <div className="debt-progress-box" style={{ margin: '0.75rem 0 0.5rem 0' }}>
+                        <div className="debt-progress-bar" style={{ height: '8px' }}>
+                          <div className="debt-progress-fill" style={{ width: `${perc}%` }} />
+                        </div>
+                        <div className="debt-progress-labels" style={{ fontSize: '0.72rem', marginTop: '0.35rem' }}>
+                          <span>Amortizado: {formatBRL(totalAmort)} ({perc}%)</span>
+                          <span>Saldo Devedor: {formatBRL(saldoRest)}</span>
+                        </div>
+                      </div>
 
-                  <button type="submit" className="btn-primary">
-                    💾 Salvar e Gerar Parcelas no Oracle ATP
+                      {/* Se minimizada: banner da próxima parcela */}
+                      {!isExpandida && (
+                        <div style={{
+                          padding: '0.65rem 0.85rem',
+                          background: 'rgba(255, 255, 255, 0.02)',
+                          borderRadius: '10px',
+                          display: 'flex',
+                          justifyContent: 'space-between',
+                          alignItems: 'center',
+                          marginTop: '0.5rem',
+                          border: '1px solid rgba(255, 255, 255, 0.04)',
+                          fontSize: '0.75rem'
+                        }}>
+                          <span style={{ color: '#94a3b8' }}>
+                            ⏳ Próxima: <strong>{proxParcela ? `${proxParcela.numero}ª Parcela` : 'Quitada!'}</strong> {proxParcela ? `(${formatDate(proxParcela.vencimento)} - ${formatBRL(proxParcela.valor)})` : '🎉'}
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => setDividasExpandidas(prev => ({ ...prev, [divida.id]: true }))}
+                            className="btn-secondary"
+                            style={{ fontSize: '0.7rem', padding: '0.3rem 0.6rem', color: '#38bdf8', borderColor: 'rgba(56, 189, 248, 0.3)' }}
+                          >
+                            👁️ Ver {parcs.length} Parcelas ▼
+                          </button>
+                        </div>
+                      )}
+
+                      {/* Se expandida: lista detalhada de parcelas com botões de editar e status */}
+                      {isExpandida && (
+                        <div style={{ marginTop: '0.75rem' }}>
+                          {parcs.length === 0 ? (
+                            <p style={{ fontSize: '0.75rem', color: '#94a3b8', textAlign: 'center', padding: '0.75rem' }}>
+                              Nenhuma parcela cadastrada para este acordo. Clique em ➕ para adicionar.
+                            </p>
+                          ) : (
+                            parcs.map((parc) => (
+                              <div key={parc.id || parc.numero} className={`installment-item-v2 ${parc.paga ? 'is-paid' : ''}`}>
+                                <div className="inst-left">
+                                  <div className="installment-num" style={{ width: '28px', height: '28px', fontSize: '0.75rem' }}>
+                                    {parc.paga ? '✓' : parc.numero}
+                                  </div>
+                                  <div style={{ minWidth: 0 }}>
+                                    <div style={{ fontSize: '0.82rem', fontWeight: 600, color: '#f8fafc', display: 'flex', alignItems: 'center', gap: '0.35rem', flexWrap: 'wrap' }}>
+                                      <span>{parc.numero}ª Parcela</span>
+                                      <span style={{ fontSize: '0.72rem', color: '#94a3b8' }}>
+                                        • Vence: {formatDate(parc.vencimento)}
+                                      </span>
+                                    </div>
+                                    <div style={{ fontSize: '0.68rem', color: parc.paga ? '#10b981' : '#94a3b8' }}>
+                                      {parc.paga ? `Pago em ${formatDate(parc.dataPagamento || parc.vencimento)}` : 'Pendente'}
+                                    </div>
+                                    {parc.observacao && (
+                                      <div style={{ fontSize: '0.68rem', color: '#f59e0b', marginTop: '0.1rem', wordBreak: 'break-word' }}>
+                                        💡 {parc.observacao}
+                                      </div>
+                                    )}
+                                  </div>
+                                </div>
+
+                                <div className="inst-right">
+                                  <span style={{ fontFamily: 'var(--font-mono)', fontSize: '0.85rem', fontWeight: 700, color: '#f8fafc' }}>
+                                    {formatBRL(parc.valor)}
+                                  </span>
+                                  <button
+                                    type="button"
+                                    onClick={() => toggleParcela(parc, divida.id)}
+                                    className={`btn-toggle-paid ${parc.paga ? 'paid' : 'pending'}`}
+                                    style={{ fontSize: '0.7rem', padding: '0.3rem 0.55rem' }}
+                                  >
+                                    {parc.paga ? 'Paga ✓' : 'Pagar'}
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => abrirModalEditarParcela(parc, divida.id, divida.banco)}
+                                    className="btn-action-sm"
+                                    title="Editar Parcela (Valor, Data, Nota)"
+                                    style={{ width: '28px', height: '28px', fontSize: '0.72rem' }}
+                                  >
+                                    ✏️
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleExcluirParcela(parc.id, divida.id)}
+                                    className="btn-action-sm danger"
+                                    title="Excluir Parcela"
+                                    style={{ width: '28px', height: '28px', fontSize: '0.72rem' }}
+                                  >
+                                    🗑️
+                                  </button>
+                                </div>
+                              </div>
+                            ))
+                          )}
+                        </div>
+                      )}
+                    </section>
+                  );
+                })
+              ) : (
+                /* Card quando não há dívidas cadastradas */
+                <section className="card" style={{ textAlign: 'center', padding: '2rem 1.25rem' }}>
+                  <div style={{ fontSize: '2.5rem', marginBottom: '0.5rem' }}>🎉</div>
+                  <h3 style={{ fontSize: '1.05rem', fontWeight: 700, color: '#fff', marginBottom: '0.35rem' }}>
+                    Nenhuma dívida cadastrada!
+                  </h3>
+                  <p style={{ fontSize: '0.8rem', color: '#94a3b8', lineHeight: 1.5, marginBottom: '1rem', maxWidth: '340px', margin: '0 auto 1rem auto' }}>
+                    Se você possui algum acordo de cartão, empréstimo ou parcelamento que quer liquidar, cadastre abaixo para gerenciar mês a mês.
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setDividaBanco('');
+                      setDividaValorTotal('');
+                      setDividaParcelasQtd('6');
+                      setDividaValorParcela('');
+                      setDividaObs('');
+                      gerarPreviewParcelas('', '6', dividaVencimento, '');
+                      setMostrarFormDivida(true);
+                    }}
+                    className="btn-primary"
+                    style={{ margin: '0 auto' }}
+                  >
+                    + Cadastrar Minha Dívida / Acordo
                   </button>
-                </form>
-              </section>
-            )}
+                </section>
+              )}
+            </div>
 
             {/* SEÇÃO: DÍVIDAS E FATURAS PRÓXIMO MÊS (PICPAY, ETC.) */}
             <section className="card" style={{ borderLeft: '4px solid #10b981' }}>
@@ -3868,6 +4252,501 @@ export default function Dashboard({ onLogout }) {
           <span className="nav-tab-label">Perfil</span>
         </button>
       </nav>
+
+      {/* 1. MODAL CADASTRAR NOVA DÍVIDA COM PREVIEW DE PARCELAS */}
+      {mostrarFormDivida && (
+        <div className="modal-overlay-custom" onClick={() => setMostrarFormDivida(false)}>
+          <div className="modal-dialog-custom" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header-custom">
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                <span style={{ fontSize: '1.2rem' }}>📝</span>
+                <strong style={{ fontSize: '1rem', color: '#f8fafc' }}>
+                  Cadastrar Nova Dívida / Acordo
+                </strong>
+              </div>
+              <button
+                type="button"
+                onClick={() => setMostrarFormDivida(false)}
+                className="btn-del"
+                style={{ width: '30px', height: '30px', borderRadius: '8px', cursor: 'pointer' }}
+              >
+                ✕
+              </button>
+            </div>
+
+            <form onSubmit={handleSalvarNovaDivida} style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}>
+              <div className="modal-body-custom">
+                <div className="form-group" style={{ marginBottom: '0.85rem' }}>
+                  <label style={{ fontSize: '0.75rem', color: '#94a3b8', display: 'block', marginBottom: '0.25rem' }}>
+                    Nome da Dívida / Banco / Credor *
+                  </label>
+                  <input
+                    type="text"
+                    className="input-field"
+                    placeholder="Ex: Itaú Click, Nubank, Empréstimo Caixa, Cartão XP"
+                    value={dividaBanco}
+                    onChange={(e) => {
+                      setDividaBanco(e.target.value);
+                      gerarPreviewParcelas(dividaValorTotal, dividaParcelasQtd, dividaVencimento, e.target.value);
+                    }}
+                    required
+                  />
+                </div>
+
+                <div className="input-row" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.65rem', marginBottom: '0.85rem' }}>
+                  <div>
+                    <label style={{ fontSize: '0.75rem', color: '#94a3b8', display: 'block', marginBottom: '0.25rem' }}>
+                      Valor Total Acordo (R$) *
+                    </label>
+                    <input
+                      type="text"
+                      className="input-field"
+                      placeholder="Ex: 5000.00"
+                      value={dividaValorTotal}
+                      onChange={(e) => {
+                        setDividaValorTotal(e.target.value);
+                        gerarPreviewParcelas(e.target.value, dividaParcelasQtd, dividaVencimento, dividaBanco);
+                      }}
+                      required
+                    />
+                  </div>
+                  <div>
+                    <label style={{ fontSize: '0.75rem', color: '#94a3b8', display: 'block', marginBottom: '0.25rem' }}>
+                      Nº de Parcelas *
+                    </label>
+                    <input
+                      type="number"
+                      min="1"
+                      max="120"
+                      className="input-field"
+                      placeholder="Ex: 6"
+                      value={dividaParcelasQtd}
+                      onChange={(e) => {
+                        setDividaParcelasQtd(e.target.value);
+                        gerarPreviewParcelas(dividaValorTotal, e.target.value, dividaVencimento, dividaBanco);
+                      }}
+                      required
+                    />
+                  </div>
+                </div>
+
+                <div className="input-row" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.65rem', marginBottom: '0.85rem' }}>
+                  <div>
+                    <label style={{ fontSize: '0.75rem', color: '#94a3b8', display: 'block', marginBottom: '0.25rem' }}>
+                      1º Vencimento *
+                    </label>
+                    <input
+                      type="date"
+                      className="input-field"
+                      value={dividaVencimento}
+                      onChange={(e) => {
+                        setDividaVencimento(e.target.value);
+                        gerarPreviewParcelas(dividaValorTotal, dividaParcelasQtd, e.target.value, dividaBanco);
+                      }}
+                      required
+                    />
+                  </div>
+                  <div>
+                    <label style={{ fontSize: '0.75rem', color: '#94a3b8', display: 'block', marginBottom: '0.25rem' }}>
+                      Observação (Opcional)
+                    </label>
+                    <input
+                      type="text"
+                      className="input-field"
+                      placeholder="Ex: Negociação com 40% de desconto"
+                      value={dividaObs}
+                      onChange={(e) => setDividaObs(e.target.value)}
+                    />
+                  </div>
+                </div>
+
+                {/* Pré-visualização Interativa das Parcelas */}
+                <div style={{ marginTop: '0.5rem' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <label style={{ fontSize: '0.75rem', fontWeight: 700, color: '#38bdf8', display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
+                      <span>📋</span> Pré-visualização das Parcelas ({previewParcelas.length})
+                    </label>
+                    <span style={{ fontSize: '0.68rem', color: '#94a3b8' }}>
+                      Você pode ajustar os valores individualmente abaixo
+                    </span>
+                  </div>
+
+                  <div className="preview-installments-table">
+                    {previewParcelas.length === 0 ? (
+                      <p style={{ fontSize: '0.72rem', color: '#94a3b8', textAlign: 'center', padding: '1rem' }}>
+                        Preencha o valor e a quantidade de parcelas para visualizar.
+                      </p>
+                    ) : (
+                      previewParcelas.map((parc, pIdx) => (
+                        <div key={pIdx} className="preview-inst-row">
+                          <span style={{ fontWeight: 700, color: '#f8fafc' }}>{parc.numero}ª</span>
+                          <input
+                            type="date"
+                            value={parc.vencimento}
+                            onChange={(e) => {
+                              const novas = [...previewParcelas];
+                              novas[pIdx].vencimento = e.target.value;
+                              setPreviewParcelas(novas);
+                            }}
+                            className="input-field"
+                            style={{ fontSize: '0.72rem', padding: '0.25rem 0.4rem', height: '28px' }}
+                          />
+                          <input
+                            type="number"
+                            step="0.01"
+                            value={parc.valor}
+                            onChange={(e) => {
+                              const novas = [...previewParcelas];
+                              novas[pIdx].valor = parseFloat(e.target.value) || 0;
+                              setPreviewParcelas(novas);
+                            }}
+                            className="input-field"
+                            placeholder="R$"
+                            style={{ fontSize: '0.72rem', padding: '0.25rem 0.4rem', height: '28px', textAlign: 'right' }}
+                          />
+                        </div>
+                      ))
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              <div className="modal-footer-custom">
+                <button
+                  type="button"
+                  onClick={() => setMostrarFormDivida(false)}
+                  className="btn-secondary"
+                  style={{ fontSize: '0.8rem', padding: '0.45rem 0.85rem' }}
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  className="btn-primary"
+                  style={{ fontSize: '0.8rem', padding: '0.45rem 1rem' }}
+                >
+                  💾 Salvar e Gerar Dívida
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* 2. MODAL EDITAR DÍVIDA EXISTENTE */}
+      {modalEditarDivida.aberta && (
+        <div className="modal-overlay-custom" onClick={() => setModalEditarDivida({ aberta: false, divida: null })}>
+          <div className="modal-dialog-custom" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header-custom">
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                <span style={{ fontSize: '1.2rem' }}>✏️</span>
+                <strong style={{ fontSize: '1rem', color: '#f8fafc' }}>
+                  Editar Acordo / Dívida
+                </strong>
+              </div>
+              <button
+                type="button"
+                onClick={() => setModalEditarDivida({ aberta: false, divida: null })}
+                className="btn-del"
+                style={{ width: '30px', height: '30px', borderRadius: '8px', cursor: 'pointer' }}
+              >
+                ✕
+              </button>
+            </div>
+
+            <form onSubmit={handleSalvarEdicaoDivida}>
+              <div className="modal-body-custom">
+                <div className="form-group" style={{ marginBottom: '0.85rem' }}>
+                  <label style={{ fontSize: '0.75rem', color: '#94a3b8', display: 'block', marginBottom: '0.25rem' }}>
+                    Nome da Dívida / Banco *
+                  </label>
+                  <input
+                    type="text"
+                    className="input-field"
+                    value={editDividaBanco}
+                    onChange={(e) => setEditDividaBanco(e.target.value)}
+                    required
+                  />
+                </div>
+
+                <div className="input-row" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.65rem', marginBottom: '0.85rem' }}>
+                  <div>
+                    <label style={{ fontSize: '0.75rem', color: '#94a3b8', display: 'block', marginBottom: '0.25rem' }}>
+                      Valor Total Acordo (R$)
+                    </label>
+                    <input
+                      type="text"
+                      className="input-field"
+                      value={editDividaValorTotal}
+                      onChange={(e) => setEditDividaValorTotal(e.target.value)}
+                    />
+                  </div>
+                  <div>
+                    <label style={{ fontSize: '0.75rem', color: '#94a3b8', display: 'block', marginBottom: '0.25rem' }}>
+                      Valor Médio Parcela (R$)
+                    </label>
+                    <input
+                      type="text"
+                      className="input-field"
+                      value={editDividaValorParcela}
+                      onChange={(e) => setEditDividaValorParcela(e.target.value)}
+                    />
+                  </div>
+                </div>
+
+                <div className="form-group">
+                  <label style={{ fontSize: '0.75rem', color: '#94a3b8', display: 'block', marginBottom: '0.25rem' }}>
+                    Observações / Anotações
+                  </label>
+                  <textarea
+                    className="input-field"
+                    rows="2"
+                    value={editDividaObs}
+                    onChange={(e) => setEditDividaObs(e.target.value)}
+                    placeholder="Ex: Renegociação em 6x com desconto no app"
+                    style={{ resize: 'vertical' }}
+                  />
+                </div>
+              </div>
+
+              <div className="modal-footer-custom">
+                <button
+                  type="button"
+                  onClick={() => setModalEditarDivida({ aberta: false, divida: null })}
+                  className="btn-secondary"
+                  style={{ fontSize: '0.8rem', padding: '0.45rem 0.85rem' }}
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  className="btn-primary"
+                  style={{ fontSize: '0.8rem', padding: '0.45rem 1rem' }}
+                >
+                  💾 Salvar Alterações
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* 3. MODAL EDITAR PARCELA INDIVIDUAL */}
+      {modalEditarParcela.aberta && (
+        <div className="modal-overlay-custom" onClick={() => setModalEditarParcela({ aberta: false, parcela: null, debtId: null, banco: '' })}>
+          <div className="modal-dialog-custom" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header-custom">
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                <span style={{ fontSize: '1.2rem' }}>✏️</span>
+                <strong style={{ fontSize: '1rem', color: '#f8fafc' }}>
+                  Editar Parcela {editParcelaNumero}ª ({modalEditarParcela.banco})
+                </strong>
+              </div>
+              <button
+                type="button"
+                onClick={() => setModalEditarParcela({ aberta: false, parcela: null, debtId: null, banco: '' })}
+                className="btn-del"
+                style={{ width: '30px', height: '30px', borderRadius: '8px', cursor: 'pointer' }}
+              >
+                ✕
+              </button>
+            </div>
+
+            <form onSubmit={handleSalvarEdicaoParcela}>
+              <div className="modal-body-custom">
+                <div className="input-row" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.65rem', marginBottom: '0.85rem' }}>
+                  <div>
+                    <label style={{ fontSize: '0.75rem', color: '#94a3b8', display: 'block', marginBottom: '0.25rem' }}>
+                      Nº da Parcela
+                    </label>
+                    <input
+                      type="number"
+                      min="1"
+                      className="input-field"
+                      value={editParcelaNumero}
+                      onChange={(e) => setEditParcelaNumero(e.target.value)}
+                      required
+                    />
+                  </div>
+                  <div>
+                    <label style={{ fontSize: '0.75rem', color: '#94a3b8', display: 'block', marginBottom: '0.25rem' }}>
+                      Valor da Parcela (R$) *
+                    </label>
+                    <input
+                      type="text"
+                      className="input-field"
+                      placeholder="Ex: 1935.43"
+                      value={editParcelaValor}
+                      onChange={(e) => setEditParcelaValor(e.target.value)}
+                      required
+                    />
+                  </div>
+                </div>
+
+                <div className="input-row" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.65rem', marginBottom: '0.85rem' }}>
+                  <div>
+                    <label style={{ fontSize: '0.75rem', color: '#94a3b8', display: 'block', marginBottom: '0.25rem' }}>
+                      Data de Vencimento *
+                    </label>
+                    <input
+                      type="date"
+                      className="input-field"
+                      value={editParcelaVencimento}
+                      onChange={(e) => setEditParcelaVencimento(e.target.value)}
+                      required
+                    />
+                  </div>
+                  <div>
+                    <label style={{ fontSize: '0.75rem', color: '#94a3b8', display: 'block', marginBottom: '0.25rem' }}>
+                      Status da Parcela
+                    </label>
+                    <button
+                      type="button"
+                      onClick={() => setEditParcelaPaga(!editParcelaPaga)}
+                      className={`btn-toggle-paid ${editParcelaPaga ? 'paid' : 'pending'}`}
+                      style={{ width: '100%', height: '40px', justifyContent: 'center', fontSize: '0.82rem' }}
+                    >
+                      {editParcelaPaga ? '✓ Parcela Paga' : '⏳ Pendente de Pagamento'}
+                    </button>
+                  </div>
+                </div>
+
+                <div className="form-group">
+                  <label style={{ fontSize: '0.75rem', color: '#94a3b8', display: 'block', marginBottom: '0.25rem' }}>
+                    Observação da Parcela
+                  </label>
+                  <input
+                    type="text"
+                    className="input-field"
+                    placeholder="Ex: Parcela antecipada com 13º salário com desconto"
+                    value={editParcelaObs}
+                    onChange={(e) => setEditParcelaObs(e.target.value)}
+                  />
+                </div>
+              </div>
+
+              <div className="modal-footer-custom">
+                <button
+                  type="button"
+                  onClick={() => setModalEditarParcela({ aberta: false, parcela: null, debtId: null, banco: '' })}
+                  className="btn-secondary"
+                  style={{ fontSize: '0.8rem', padding: '0.45rem 0.85rem' }}
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  className="btn-primary"
+                  style={{ fontSize: '0.8rem', padding: '0.45rem 1rem' }}
+                >
+                  💾 Salvar Parcela
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* 4. MODAL ADICIONAR PARCELA AVULSA */}
+      {modalAddParcela.aberta && (
+        <div className="modal-overlay-custom" onClick={() => setModalAddParcela({ aberta: false, debtId: null, banco: '' })}>
+          <div className="modal-dialog-custom" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header-custom">
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                <span style={{ fontSize: '1.2rem' }}>➕</span>
+                <strong style={{ fontSize: '1rem', color: '#f8fafc' }}>
+                  Adicionar Parcela ao Acordo: {modalAddParcela.banco}
+                </strong>
+              </div>
+              <button
+                type="button"
+                onClick={() => setModalAddParcela({ aberta: false, debtId: null, banco: '' })}
+                className="btn-del"
+                style={{ width: '30px', height: '30px', borderRadius: '8px', cursor: 'pointer' }}
+              >
+                ✕
+              </button>
+            </div>
+
+            <form onSubmit={handleSalvarNovaParcelaAvulsa}>
+              <div className="modal-body-custom">
+                <div className="input-row" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.65rem', marginBottom: '0.85rem' }}>
+                  <div>
+                    <label style={{ fontSize: '0.75rem', color: '#94a3b8', display: 'block', marginBottom: '0.25rem' }}>
+                      Nº da Parcela
+                    </label>
+                    <input
+                      type="number"
+                      min="1"
+                      className="input-field"
+                      value={addParcelaNumero}
+                      onChange={(e) => setAddParcelaNumero(e.target.value)}
+                      required
+                    />
+                  </div>
+                  <div>
+                    <label style={{ fontSize: '0.75rem', color: '#94a3b8', display: 'block', marginBottom: '0.25rem' }}>
+                      Valor da Parcela (R$) *
+                    </label>
+                    <input
+                      type="text"
+                      className="input-field"
+                      placeholder="Ex: 500.00"
+                      value={addParcelaValor}
+                      onChange={(e) => setAddParcelaValor(e.target.value)}
+                      required
+                    />
+                  </div>
+                </div>
+
+                <div className="form-group" style={{ marginBottom: '0.85rem' }}>
+                  <label style={{ fontSize: '0.75rem', color: '#94a3b8', display: 'block', marginBottom: '0.25rem' }}>
+                    Data de Vencimento *
+                  </label>
+                  <input
+                    type="date"
+                    className="input-field"
+                    value={addParcelaVencimento}
+                    onChange={(e) => setAddParcelaVencimento(e.target.value)}
+                    required
+                  />
+                </div>
+
+                <div className="form-group">
+                  <label style={{ fontSize: '0.75rem', color: '#94a3b8', display: 'block', marginBottom: '0.25rem' }}>
+                    Observação (Opcional)
+                  </label>
+                  <input
+                    type="text"
+                    className="input-field"
+                    placeholder="Ex: Parcela extra negociada para liquidação"
+                    value={addParcelaObs}
+                    onChange={(e) => setAddParcelaObs(e.target.value)}
+                  />
+                </div>
+              </div>
+
+              <div className="modal-footer-custom">
+                <button
+                  type="button"
+                  onClick={() => setModalAddParcela({ aberta: false, debtId: null, banco: '' })}
+                  className="btn-secondary"
+                  style={{ fontSize: '0.8rem', padding: '0.45rem 0.85rem' }}
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  className="btn-primary"
+                  style={{ fontSize: '0.8rem', padding: '0.45rem 1rem' }}
+                >
+                  ➕ Adicionar Parcela
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
 
       {/* MODAL TUTORIAL: INSTALAR PWA NO IPHONE E ANDROID */}
       {mostrarModalPwa && (

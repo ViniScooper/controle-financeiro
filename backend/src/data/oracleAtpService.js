@@ -24,6 +24,30 @@ const ADMIN_INITIAL_DATA = {
     notificacoesWppAtivas: true,
     diaLembreteWpp: 2
   },
+  dividas: [
+    {
+      id: "divida-itau",
+      banco: "Itaú Click",
+      faturaAgosto: 8390.72,
+      entradaAgostoPaga: 797.12,
+      saldoFinanciadoComIOF: 7697.30,
+      taxaJurosMensal: "12,9% a.m.",
+      taxaJurosAnual: "337,63% a.a.",
+      jurosTotais: 3915.28,
+      valorTotalAcordo: 11612.58,
+      quantidadeParcelas: 6,
+      valorParcela: 1935.43,
+      observacao: "Acordo renegociação cartão Itaú Click 6x",
+      parcelas: [
+        { id: 1, numero: 1, vencimento: "2026-09-05", valor: 1935.43, paga: true, dataPagamento: "2026-09-05", observacao: "1ª parcela do acordo Itaú paga em dia" },
+        { id: 2, numero: 2, vencimento: "2026-10-05", valor: 1935.43, paga: false, dataPagamento: null, observacao: "Pagar parcela regular + antecipar com 1ª parcela do 13º salário" },
+        { id: 3, numero: 3, vencimento: "2026-11-05", valor: 1935.43, paga: false, dataPagamento: null, observacao: "Pagar parcela regular + antecipar com 2ª parcela do 13º (Expectativa de quitação total!)" },
+        { id: 4, numero: 4, vencimento: "2026-12-05", valor: 1935.43, paga: false, dataPagamento: null, observacao: "4ª parcela (se necessária) + 3ª parcela do 13º salário" },
+        { id: 5, numero: 5, vencimento: "2027-01-05", valor: 1935.43, paga: false, dataPagamento: null, observacao: "5ª parcela (Penúltima)" },
+        { id: 6, numero: 6, vencimento: "2027-02-05", valor: 1935.43, paga: false, dataPagamento: null, observacao: "6ª parcela (Última)" }
+      ]
+    }
+  ],
   dividaItau: {
     banco: "Itaú Click",
     faturaAgosto: 8390.72,
@@ -195,6 +219,28 @@ async function getUser(email) {
         dataObj.faturasCartoes = [];
       }
 
+      // Garante dividas
+      if (!Array.isArray(dataObj.dividas)) {
+        dataObj.dividas = [];
+        if (dataObj.dividaItau && (dataObj.dividaItau.banco || dataObj.dividaItau.valorTotalAcordo)) {
+          dataObj.dividas.push({
+            id: "divida-itau",
+            banco: dataObj.dividaItau.banco || "Itaú Click",
+            faturaAgosto: dataObj.dividaItau.faturaAgosto,
+            entradaAgostoPaga: dataObj.dividaItau.entradaAgostoPaga,
+            saldoFinanciadoComIOF: dataObj.dividaItau.saldoFinanciadoComIOF,
+            taxaJurosMensal: dataObj.dividaItau.taxaJurosMensal,
+            taxaJurosAnual: dataObj.dividaItau.taxaJurosAnual,
+            jurosTotais: dataObj.dividaItau.jurosTotais,
+            valorTotalAcordo: Number(dataObj.dividaItau.valorTotalAcordo || 0),
+            quantidadeParcelas: Number(dataObj.dividaItau.quantidadeParcelas || dataObj.parcelas?.length || 6),
+            valorParcela: Number(dataObj.dividaItau.valorParcela || 0),
+            observacao: "Acordo Itaú Click",
+            parcelas: Array.isArray(dataObj.parcelas) ? dataObj.parcelas : []
+          });
+        }
+      }
+
       // Garante dados WhatsApp
       if (dataObj.perfil) {
         if (!dataObj.perfil.whatsappPhone && process.env.ADMIN_WHATSAPP_PHONE) {
@@ -222,6 +268,20 @@ async function getUser(email) {
   // Fallback cache local
   if (localUsers[cleanEmail]) {
     const u = localUsers[cleanEmail];
+    if (!Array.isArray(u.dividas)) {
+      u.dividas = [];
+      if (u.dividaItau && (u.dividaItau.banco || u.dividaItau.valorTotalAcordo)) {
+        u.dividas.push({
+          id: "divida-itau",
+          banco: u.dividaItau.banco || "Itaú Click",
+          valorTotalAcordo: Number(u.dividaItau.valorTotalAcordo || 0),
+          valorParcela: Number(u.dividaItau.valorParcela || 0),
+          quantidadeParcelas: Number(u.dividaItau.quantidadeParcelas || u.parcelas?.length || 6),
+          observacao: "Acordo Itaú Click",
+          parcelas: Array.isArray(u.parcelas) ? u.parcelas : []
+        });
+      }
+    }
     return {
       email: cleanEmail,
       name: u.perfil?.nome || cleanEmail,
