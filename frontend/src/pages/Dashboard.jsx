@@ -171,6 +171,8 @@ export default function Dashboard({ onLogout }) {
   const [rendaBaseInput, setRendaBaseInput] = useState(data.perfil?.rendaLiquida || 0);
   const [rendaExtraInput, setRendaExtraInput] = useState(data.perfil?.rendaExtraMes || 0);
   const [motivoRendaExtraInput, setMotivoRendaExtraInput] = useState(data.perfil?.motivoRendaExtra || '');
+  const [diaPagamentoInput, setDiaPagamentoInput] = useState(data.perfil?.diaPagamento || 5);
+  const [regraSaldoMesInput, setRegraSaldoMesInput] = useState(data.perfil?.regraSaldoMes || 'reiniciar');
   const [emailInput, setEmailInput] = useState(data.perfil?.email || '');
   const [novaSenhaInput, setNovaSenhaInput] = useState('');
 
@@ -755,6 +757,8 @@ export default function Dashboard({ onLogout }) {
         setRendaBaseInput(res.data.perfil?.rendaLiquida || 0);
         setRendaExtraInput(res.data.perfil?.rendaExtraMes || 0);
         setMotivoRendaExtraInput(res.data.perfil?.motivoRendaExtra || '');
+        setDiaPagamentoInput(res.data.perfil?.diaPagamento || 5);
+        setRegraSaldoMesInput(res.data.perfil?.regraSaldoMes || 'reiniciar');
         setEmailInput(res.data.perfil?.email || '');
         setWhatsappPhone(res.data.perfil?.whatsappPhone || '');
         setWhatsappApiKey(res.data.perfil?.whatsappApiKey || '');
@@ -771,9 +775,9 @@ export default function Dashboard({ onLogout }) {
     carregarDados();
   }, []);
 
-  const summary = calculateFinancialSummary(data);
+  const summary = calculateFinancialSummary(data, mesAtivo);
   const rendaTotalMes = Number(data.perfil?.rendaLiquida || 0) + Number(data.perfil?.rendaExtraMes || 0);
-  const saldoLivreReal = Math.max(0, rendaTotalMes - summary.totalComprometido - summary.totalVariavel);
+  const saldoLivreReal = summary.saldoRealEmConta !== undefined ? summary.saldoRealEmConta : Math.max(0, rendaTotalMes - summary.totalComprometido - summary.totalVariavel);
 
   const listaDividas = useMemo(() => {
     let divs = Array.isArray(data.dividas) ? [...data.dividas] : [];
@@ -1664,6 +1668,8 @@ export default function Dashboard({ onLogout }) {
       rendaLiquida: parseFloat(rendaBaseInput) || 0,
       rendaExtraMes: parseFloat(rendaExtraInput || 0),
       motivoRendaExtra: motivoRendaExtraInput.trim(),
+      diaPagamento: Math.max(1, Math.min(31, parseInt(diaPagamentoInput, 10) || 5)),
+      regraSaldoMes: regraSaldoMesInput || 'reiniciar',
       email: emailInput.trim(),
       whatsappPhone: whatsappPhone.trim(),
       whatsappApiKey: whatsappApiKey.trim(),
@@ -1692,10 +1698,54 @@ export default function Dashboard({ onLogout }) {
     }
 
     setNovaSenhaInput('');
-    mostrarMensagem('Perfil, credenciais e Robô de WhatsApp salvos no Oracle ATP!');
+    mostrarMensagem('Perfil, regras de saldo e Robô de WhatsApp salvos com sucesso!');
 
     try {
       await api.put('/api/finance/profile', payload);
+      setSyncStatus('Oracle ATP (Exadata)');
+    } catch (e) {
+      setSyncStatus('Salvo local');
+    }
+  };
+
+  // Alternar Salário Recebido / Pendente para o Mês
+  const handleToggleSalarioRecebido = async (mesAlvo = mesAtivo, novoStatus = null) => {
+    const statusAtual = Boolean(data.perfil?.salariosRecebidos?.[mesAlvo]?.recebido);
+    const proximoStatus = novoStatus !== null ? novoStatus : !statusAtual;
+    const valorSalario = Number(data.perfil?.rendaLiquida || 0);
+
+    const novoSalariosRecebidos = {
+      ...(data.perfil?.salariosRecebidos || {}),
+      [mesAlvo]: {
+        recebido: proximoStatus,
+        data: proximoStatus ? new Date().toISOString().split('T')[0] : null,
+        valor: valorSalario
+      }
+    };
+
+    const novoData = {
+      ...data,
+      perfil: {
+        ...data.perfil,
+        salariosRecebidos: novoSalariosRecebidos
+      }
+    };
+
+    setData(novoData);
+    localStorage.setItem('finance_cached_data', JSON.stringify(novoData));
+
+    mostrarMensagem(
+      proximoStatus
+        ? `Salário de ${mesAlvo} marcado como RECEBIDO! Saldo liberado no mês.`
+        : `Salário de ${mesAlvo} marcado como PENDENTE / aguardando recebimento.`
+    );
+
+    try {
+      await api.post('/api/finance/salary-status', {
+        mes: mesAlvo,
+        recebido: proximoStatus,
+        valor: valorSalario
+      });
       setSyncStatus('Oracle ATP (Exadata)');
     } catch (e) {
       setSyncStatus('Salvo local');
@@ -1977,11 +2027,130 @@ export default function Dashboard({ onLogout }) {
         {/* ========================================================= */}
         {activeTab === 'dashboard' && (
           <>
+            {/* Banner de Salário Recebido / Previsto */}
+            {(() => {
+              const infoSalario = data.perfil?.salariosRecebidos?.[mesAtivo];
+              const foiRecebido = Boolean(infoSalario?.recebido);
+              const diaPag = data.perfil?.diaPagamento || 5;
+              const mesObj = MESES_DISPONIVEIS.find(m => m.id === mesAtivo) || { rotulo: mesAtivo };
+
+              return (
+                <div style={{
+                  background: foiRecebido 
+                    ? 'linear-gradient(135deg, rgba(16, 185, 129, 0.15) 0%, rgba(5, 150, 105, 0.08) 100%)' 
+                    : 'linear-gradient(135deg, rgba(245, 158, 11, 0.18) 0%, rgba(217, 119, 6, 0.08) 100%)',
+                  border: `1px solid ${foiRecebido ? 'rgba(16, 185, 129, 0.35)' : 'rgba(245, 158, 11, 0.35)'}`,
+                  borderRadius: '14px',
+                  padding: '1rem 1.25rem',
+                  marginBottom: '1.25rem',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  gap: '1rem',
+                  flexWrap: 'wrap'
+                }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.85rem', flex: '1 1 300px' }}>
+                    <div style={{
+                      width: '42px',
+                      height: '42px',
+                      borderRadius: '10px',
+                      background: foiRecebido ? 'rgba(16, 185, 129, 0.2)' : 'rgba(245, 158, 11, 0.2)',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      fontSize: '1.4rem'
+                    }}>
+                      {foiRecebido ? '💵' : '⏳'}
+                    </div>
+                    <div>
+                      <div style={{
+                        fontWeight: 700,
+                        fontSize: '0.95rem',
+                        color: foiRecebido ? '#34d399' : '#fbbf24',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '0.5rem'
+                      }}>
+                        {foiRecebido ? (
+                          <><span>Salário Recebido!</span> <span style={{ fontSize: '0.75rem', opacity: 0.85, fontWeight: 400 }}>({mesObj.rotulo})</span></>
+                        ) : (
+                          <><span>Aguardando Pagamento do Salário</span> <span style={{ fontSize: '0.75rem', opacity: 0.85, fontWeight: 400 }}>({mesObj.rotulo})</span></>
+                        )}
+                      </div>
+                      <div style={{ fontSize: '0.8rem', color: '#cbd5e1', marginTop: '0.15rem' }}>
+                        {foiRecebido ? (
+                          <span>R$ {Number(infoSalario?.valor || data.perfil?.rendaLiquida || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })} creditado na conta {infoSalario?.data ? `em ${formatDateDisplay(infoSalario.data)}` : ''}. Saldo liberado e despesas sendo deduzidas.</span>
+                        ) : (
+                          <span>Previsão de pagamento todo dia <strong>{diaPag}</strong> do mês. Clique ao lado quando o dinheiro cair na conta!</span>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
+                    {foiRecebido ? (
+                      <button
+                        onClick={() => handleToggleSalarioRecebido(mesAtivo, false)}
+                        style={{
+                          background: 'rgba(255,255,255,0.06)',
+                          border: '1px solid rgba(255,255,255,0.2)',
+                          color: '#94a3b8',
+                          padding: '0.45rem 0.9rem',
+                          borderRadius: '8px',
+                          fontSize: '0.78rem',
+                          cursor: 'pointer',
+                          fontWeight: 600,
+                          transition: 'all 0.2s'
+                        }}
+                        title="Desfazer e voltar para pendente"
+                      >
+                        ↩ Desfazer
+                      </button>
+                    ) : (
+                      <button
+                        onClick={() => handleToggleSalarioRecebido(mesAtivo, true)}
+                        className="btn-primary"
+                        style={{
+                          background: 'linear-gradient(135deg, #10b981 0%, #059669 100%)',
+                          border: 'none',
+                          color: '#ffffff',
+                          padding: '0.55rem 1.15rem',
+                          borderRadius: '8px',
+                          fontSize: '0.85rem',
+                          cursor: 'pointer',
+                          fontWeight: 700,
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '0.4rem',
+                          boxShadow: '0 4px 12px rgba(16,185,129,0.3)'
+                        }}
+                      >
+                        <span>💵</span> Salário Recebido
+                      </button>
+                    )}
+                  </div>
+                </div>
+              );
+            })()}
+
             {/* Card Saldo Livre Destaque */}
             <section className="hero-card">
               <div className="hero-label" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', flexWrap: 'wrap' }}>
                   <span>✨</span> Saldo Livre Restante do Mês
+                  {!summary.salarioRecebidoMes && (
+                    <span style={{
+                      fontSize: '0.68rem',
+                      background: 'rgba(245,158,11,0.2)',
+                      color: '#fbbf24',
+                      border: '1px solid rgba(245,158,11,0.3)',
+                      padding: '0.1rem 0.45rem',
+                      borderRadius: '6px',
+                      fontWeight: 600
+                    }}>
+                      Aguardando Salário (Dia {summary.diaPagamento})
+                    </span>
+                  )}
                 </div>
                 <button
                   onClick={toggleOcultarSaldos}
@@ -4054,6 +4223,76 @@ export default function Dashboard({ onLogout }) {
                 </div>
 
                 <div className="form-group">
+                  <label style={{ fontSize: '0.75rem', color: '#94a3b8', marginBottom: '0.25rem', display: 'block' }}>
+                    📅 Dia do Mês que Recebe o Salário (1 a 31)
+                  </label>
+                  <input
+                    type="number"
+                    min="1"
+                    max="31"
+                    className="input-field"
+                    placeholder="Ex: 5"
+                    value={diaPagamentoInput}
+                    onChange={(e) => setDiaPagamentoInput(e.target.value)}
+                    required
+                  />
+                  <small style={{ color: '#64748b', fontSize: '0.72rem', marginTop: '0.2rem', display: 'block' }}>
+                    Dia previsto no mês para o salário cair na conta (ex: todo dia 5).
+                  </small>
+                </div>
+
+                <div className="form-group">
+                  <label style={{ fontSize: '0.75rem', color: '#94a3b8', marginBottom: '0.35rem', display: 'block' }}>
+                    🔄 Regra de Fim de Mês para Saldo Restante
+                  </label>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '0.6rem' }}>
+                    <label style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '0.5rem',
+                      background: regraSaldoMesInput === 'reiniciar' ? 'rgba(16,185,129,0.12)' : 'rgba(255,255,255,0.03)',
+                      border: `1px solid ${regraSaldoMesInput === 'reiniciar' ? 'rgba(16,185,129,0.4)' : 'rgba(255,255,255,0.08)'}`,
+                      padding: '0.6rem 0.8rem',
+                      borderRadius: '8px',
+                      cursor: 'pointer',
+                      fontSize: '0.78rem',
+                      color: regraSaldoMesInput === 'reiniciar' ? '#34d399' : '#cbd5e1'
+                    }}>
+                      <input
+                        type="radio"
+                        name="regraSaldoMes"
+                        value="reiniciar"
+                        checked={regraSaldoMesInput === 'reiniciar'}
+                        onChange={(e) => setRegraSaldoMesInput(e.target.value)}
+                      />
+                      <span>🔄 Reiniciar Saldo todo Mês (Padrão)</span>
+                    </label>
+
+                    <label style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '0.5rem',
+                      background: regraSaldoMesInput === 'acumular' ? 'rgba(99,102,241,0.12)' : 'rgba(255,255,255,0.03)',
+                      border: `1px solid ${regraSaldoMesInput === 'acumular' ? 'rgba(99,102,241,0.4)' : 'rgba(255,255,255,0.08)'}`,
+                      padding: '0.6rem 0.8rem',
+                      borderRadius: '8px',
+                      cursor: 'pointer',
+                      fontSize: '0.78rem',
+                      color: regraSaldoMesInput === 'acumular' ? '#818cf8' : '#cbd5e1'
+                    }}>
+                      <input
+                        type="radio"
+                        name="regraSaldoMes"
+                        value="acumular"
+                        checked={regraSaldoMesInput === 'acumular'}
+                        onChange={(e) => setRegraSaldoMesInput(e.target.value)}
+                      />
+                      <span>📈 Acumular Sobra do Mês</span>
+                    </label>
+                  </div>
+                </div>
+
+                <div className="form-group">
                   <label style={{ fontSize: '0.75rem', color: '#10b981', fontWeight: 600, marginBottom: '0.25rem', display: 'block' }}>
                     + Dinheiro Extra deste Mês (13º Salário / Bônus / FGTS)
                   </label>
@@ -4130,6 +4369,112 @@ export default function Dashboard({ onLogout }) {
                   💾 Salvar no Oracle Autonomous Database
                 </button>
               </form>
+            </section>
+
+            {/* SEÇÃO: CONTROLE DE SALÁRIO RECEBIDO (ABA PERFIL) */}
+            <section className="card" style={{ borderLeft: '4px solid #10b981' }}>
+              <div className="card-header">
+                <div>
+                  <div className="card-title" style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                    <span style={{ fontSize: '1.2rem' }}>💵</span> Status de Recebimento do Salário ({MESES_DISPONIVEIS.find(m => m.id === mesAtivo)?.rotulo || mesAtivo})
+                  </div>
+                  <div className="card-subtitle">
+                    Marque quando o seu salário caiu na conta para liberar o saldo do mês e abater os pagamentos
+                  </div>
+                </div>
+                <span className="badge-tag" style={{
+                  color: summary.salarioRecebidoMes ? '#10b981' : '#f59e0b',
+                  borderColor: summary.salarioRecebidoMes ? 'rgba(16,185,129,0.3)' : 'rgba(245,158,11,0.3)'
+                }}>
+                  {summary.salarioRecebidoMes ? 'Salário Creditado' : 'Aguardando Pagamento'}
+                </span>
+              </div>
+
+              <div style={{
+                background: 'rgba(255,255,255,0.02)',
+                border: '1px solid rgba(255,255,255,0.06)',
+                borderRadius: '12px',
+                padding: '1.2rem',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                flexWrap: 'wrap',
+                gap: '1.2rem'
+              }}>
+                <div style={{ flex: '1 1 300px' }}>
+                  <div style={{ fontSize: '0.9rem', fontWeight: 700, color: '#f8fafc', marginBottom: '0.35rem' }}>
+                    Salário Previsto: <span style={{ color: '#10b981' }}>{formatBRL(Number(rendaBaseInput || 0))}</span>
+                  </div>
+                  <div style={{ fontSize: '0.8rem', color: '#94a3b8', lineHeight: '1.4' }}>
+                    Dia programado: <strong>Todo dia {diaPagamentoInput || 5}</strong> do mês.
+                    <br />
+                    Regra de fim de mês: <strong>{regraSaldoMesInput === 'acumular' ? 'Acumular sobra para o próximo mês' : 'Reiniciar saldo todo mês'}</strong>.
+                  </div>
+                  <div style={{
+                    fontSize: '0.8rem',
+                    fontWeight: 600,
+                    color: summary.salarioRecebidoMes ? '#34d399' : '#fbbf24',
+                    marginTop: '0.5rem',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '0.35rem'
+                  }}>
+                    {summary.salarioRecebidoMes ? (
+                      <>
+                        <span>✅</span> Salário confirmado! Os pagamentos de despesas e contas estão sendo subtraídos deste saldo.
+                      </>
+                    ) : (
+                      <>
+                        <span>⏳</span> O salário ainda não foi confirmado como recebido neste mês. Clique no botão ao lado para confirmar.
+                      </>
+                    )}
+                  </div>
+                </div>
+
+                <div>
+                  {summary.salarioRecebidoMes ? (
+                    <button
+                      type="button"
+                      onClick={() => handleToggleSalarioRecebido(mesAtivo, false)}
+                      style={{
+                        background: 'rgba(239, 68, 68, 0.1)',
+                        border: '1px solid rgba(239, 68, 68, 0.3)',
+                        color: '#f87171',
+                        padding: '0.65rem 1.1rem',
+                        borderRadius: '8px',
+                        fontSize: '0.85rem',
+                        cursor: 'pointer',
+                        fontWeight: 600,
+                        transition: 'all 0.2s'
+                      }}
+                    >
+                      ↩ Desfazer / Resetar Salário
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => handleToggleSalarioRecebido(mesAtivo, true)}
+                      className="btn-primary"
+                      style={{
+                        background: 'linear-gradient(135deg, #10b981 0%, #059669 100%)',
+                        border: 'none',
+                        color: '#ffffff',
+                        padding: '0.75rem 1.4rem',
+                        borderRadius: '8px',
+                        fontSize: '0.9rem',
+                        cursor: 'pointer',
+                        fontWeight: 700,
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '0.5rem',
+                        boxShadow: '0 4px 14px rgba(16,185,129,0.35)'
+                      }}
+                    >
+                      <span>💵</span> Salário Recebido
+                    </button>
+                  )}
+                </div>
+              </div>
             </section>
 
             {/* SEÇÃO: ROBÔ DE NOTIFICAÇÕES WHATSAPP */}

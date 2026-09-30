@@ -212,7 +212,10 @@ router.put('/profile', async (req, res) => {
       whatsappPhone,
       whatsappApiKey,
       notificacoesWppAtivas,
-      diaLembreteWpp
+      diaLembreteWpp,
+      diaPagamento,
+      regraSaldoMes,
+      salariosRecebidos
     } = req.body;
 
     if (nome) data.perfil.nome = String(nome).trim();
@@ -243,13 +246,66 @@ router.put('/profile', async (req, res) => {
     if (diaLembreteWpp !== undefined && !isNaN(Number(diaLembreteWpp))) {
       data.perfil.diaLembreteWpp = Number(diaLembreteWpp);
     }
+    if (diaPagamento !== undefined && !isNaN(Number(diaPagamento))) {
+      data.perfil.diaPagamento = Math.max(1, Math.min(31, parseInt(diaPagamento)));
+    }
+    if (regraSaldoMes !== undefined) {
+      data.perfil.regraSaldoMes = String(regraSaldoMes).trim();
+    }
+    if (salariosRecebidos !== undefined && typeof salariosRecebidos === 'object') {
+      data.perfil.salariosRecebidos = {
+        ...(data.perfil.salariosRecebidos || {}),
+        ...salariosRecebidos
+      };
+    }
 
     await oracleAtp.saveUser(userEmail, data.perfil.nome, data.perfil.senha || userRecord.password, data);
     const summary = computeSummary(data);
 
     return res.json({
       success: true,
-      mensagem: 'Perfil, renda e dados do WhatsApp salvos no Oracle ATP!',
+      mensagem: 'Perfil, renda, configurações de salário e WhatsApp salvos no Oracle ATP!',
+      summary,
+      ...data
+    });
+  } catch (err) {
+    return res.status(500).json({ success: false, erro: err.message });
+  }
+});
+
+// POST /api/finance/salary-status (Confirmar / Desfazer Salário Recebido do Mês)
+router.post('/salary-status', async (req, res) => {
+  try {
+    const userEmail = getUserEmail(req);
+    const userRecord = await oracleAtp.getUser(userEmail);
+    if (!userRecord) return res.status(404).json({ success: false, erro: 'Usuário não encontrado.' });
+
+    const data = userRecord.data;
+    const { mes, recebido, dataPagamento, valor } = req.body;
+    if (!mes) return res.status(400).json({ success: false, erro: 'Mês de referência (ex: "2026-10") é obrigatório.' });
+
+    if (!data.perfil) data.perfil = {};
+    if (!data.perfil.salariosRecebidos) data.perfil.salariosRecebidos = {};
+
+    const isRecebido = Boolean(recebido);
+    const dataIso = isRecebido ? (dataPagamento || new Date().toISOString().split('T')[0]) : null;
+    const valorSalario = valor !== undefined ? Number(valor) : Number(data.perfil.rendaLiquida || 0);
+
+    data.perfil.salariosRecebidos[mes] = {
+      recebido: isRecebido,
+      data: dataIso,
+      valor: valorSalario
+    };
+
+    await oracleAtp.saveUser(userEmail, data.perfil.nome, data.perfil.senha || userRecord.password, data);
+    const summary = computeSummary(data);
+
+    return res.json({
+      success: true,
+      mensagem: isRecebido ? `Salário do mês ${mes} marcado como RECEBIDO (+ R$ ${valorSalario.toFixed(2)})!` : `Salário do mês ${mes} marcado como PENDENTE.`,
+      mes,
+      statusSalario: data.perfil.salariosRecebidos[mes],
+      salariosRecebidos: data.perfil.salariosRecebidos,
       summary,
       ...data
     });

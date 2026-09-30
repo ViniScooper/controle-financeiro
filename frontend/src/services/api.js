@@ -28,7 +28,12 @@ export const DEFAULT_FINANCE_STATE = {
     rendaLiquida: 0.00,
     rendaExtraMes: 0.00,
     motivoRendaExtra: "",
-    meta: "Controle financeiro pessoal e quitação de despesas"
+    meta: "Controle financeiro pessoal e quitação de despesas",
+    diaPagamento: 5,
+    regraSaldoMes: "reiniciar",
+    salariosRecebidos: {
+      "2026-09": { recebido: true, data: "2026-09-05", valor: 0 }
+    }
   },
   dividas: [], // Lista de dívidas e acordos com parcelas individuais
   dividaItau: null, // Legado / retrocompatibilidade
@@ -48,10 +53,28 @@ export const DEFAULT_FINANCE_STATE = {
   planejamentoExtra: []
 };
 
-export function calculateFinancialSummary(data = {}) {
+export function calculateFinancialSummary(data = {}, mesAtivo = null) {
   const renda = Number(data.perfil?.rendaLiquida || 0);
   const rendaExtra = Number(data.perfil?.rendaExtraMes || 0);
   const rendaTotalMes = renda + rendaExtra;
+
+  const diaPagamento = Number(data.perfil?.diaPagamento || 5);
+  const regraSaldoMes = data.perfil?.regraSaldoMes || 'reiniciar';
+  const salariosRecebidos = data.perfil?.salariosRecebidos || {};
+
+  // Verifica se o salário do mês de referência foi marcado como recebido
+  let salarioRecebidoMes = true;
+  if (mesAtivo) {
+    if (salariosRecebidos[mesAtivo] !== undefined) {
+      salarioRecebidoMes = Boolean(salariosRecebidos[mesAtivo]?.recebido);
+    } else {
+      // Meses anteriores a outubro de 2026 considerados recebidos por histórico padrão
+      salarioRecebidoMes = mesAtivo < '2026-10';
+    }
+  }
+
+  // Renda efetivamente creditada em conta no mês
+  const rendaEfetivaCreditada = (salarioRecebidoMes ? renda : 0) + rendaExtra;
 
   // Unifica dívidas: usa data.dividas se existir ou migra dividaItau legado
   let listaDividas = Array.isArray(data.dividas) ? [...data.dividas] : [];
@@ -99,6 +122,9 @@ export function calculateFinancialSummary(data = {}) {
   const totalVariavel = (data.despesasVariaveis || []).reduce((acc, d) => acc + Number(d.valor || 0), 0);
   const saldoLivreAtual = Math.max(0, saldoLivreBase - totalVariavel);
 
+  // Saldo real considerando se o salário já caiu ou se ainda está aguardando
+  const saldoRealEmConta = Math.max(0, rendaEfetivaCreditada - totalComprometido - totalVariavel);
+
   const faturasCartoes = data.faturasCartoes || [];
   const totalFaturasCartoes = faturasCartoes.reduce((acc, f) => acc + Number(f.valor || 0), 0);
   const totalFaturasPendentes = faturasCartoes.filter(f => !f.paga).reduce((acc, f) => acc + Number(f.valor || 0), 0);
@@ -110,6 +136,11 @@ export function calculateFinancialSummary(data = {}) {
     renda,
     rendaExtra,
     rendaTotalMes,
+    diaPagamento,
+    regraSaldoMes,
+    salarioRecebidoMes,
+    rendaEfetivaCreditada,
+    saldoRealEmConta,
     motivoRendaExtra: data.perfil?.motivoRendaExtra || '',
     valorParcela: valorParcelaMensal,
     totalFixos,

@@ -13,7 +13,12 @@ const INITIAL_DATA = {
     rendaLiquida: 4400.00,
     rendaExtraMes: 0.00,
     motivoRendaExtra: "",
-    meta: "Controle financeiro pessoal e quitação de despesas"
+    meta: "Controle financeiro pessoal e quitação de despesas",
+    diaPagamento: 5,
+    regraSaldoMes: "reiniciar",
+    salariosRecebidos: {
+      "2026-09": { recebido: true, data: "2026-09-05", valor: 4400.00 }
+    }
   },
   dividas: [
     {
